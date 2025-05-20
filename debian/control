@@ -1,0 +1,25 @@
+Source: cosmic-osk
+Section: admin
+Priority: optional
+Maintainer: Jeremy Soller <jeremy@system76.com>
+Build-Depends:
+    debhelper-compat (=13),
+    just (>= 1.13.0),
+    libxkbcommon-dev,
+    pkg-config,
+    rust-all,
+Standards-Version: 4.6.2
+Homepage: https://github.com/pop-os/cosmic-osk
+
+Package: cosmic-osk
+Architecture: amd64 arm64
+Depends:
+    appstream-data-pop,
+    apt-config-icons,
+    apt-config-icons-hidpi,
+    apt-config-icons-large,
+    apt-config-icons-large-hidpi,
+    cosmic-icons,
+    ${misc:Depends},
+    ${shlibs:Depends}
+Description: COSMIC On-Screen Keyboard

@@ -1,0 +1,8 @@
+/.cargo/
+/debian/*debhelper*
+/debian/cosmic-osk.substvars
+/debian/cosmic-osk/
+/debian/files
+/target/
+/vendor.tar
+/vendor/

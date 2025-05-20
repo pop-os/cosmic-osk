@@ -1,0 +1,20 @@
+[package]
+name = "cosmic-osk"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+env_logger = "0.11"
+log = "0.4"
+serde = { version = "1", features = ["serde_derive"] }
+# Internationalization
+icu_collator = "1.5"
+icu_provider = { version = "1.5", features = ["sync"] }
+i18n-embed = { version = "0.15", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.9"
+rust-embed = "8"
+
+[dependencies.libcosmic]
+git = "https://github.com/pop-os/libcosmic"
+default-features = false
+features = ["multi-window", "wayland", "winit"]
