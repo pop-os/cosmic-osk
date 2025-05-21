@@ -76,11 +76,11 @@ pub struct Flags {
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum Message {
-    Button {
-        layer: usize,
-        row: usize,
-        col: usize,
+    Key {
+        action: layout::Action,
+        pressed: bool,
     },
+    Layer(usize),
     Layout(Layout),
     VkeTx(channel::Sender<VkEvent>),
 }
@@ -138,39 +138,24 @@ impl Application for App {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Button { layer, row, col } => {
-                if let Some(layout) = &self.layout {
-                    if let Some(key) = layout
-                        .layers
-                        .get(layer)
-                        .and_then(|x| x.rows.get(row))
-                        .and_then(|x| x.get(col))
-                    {
-                        log::warn!("{:?}", key);
-                        match key.action {
-                            layout::Action::None => {}
-                            layout::Action::Keycode(kc) => {
-                                match &self.vke_tx {
-                                    Some(vke_tx) => {
-                                        //TODO: run in task
-                                        vke_tx.send(VkEvent::Key(kc, true)).unwrap();
-                                        vke_tx.send(VkEvent::Key(kc, false)).unwrap();
-                                    }
-                                    None => {
-                                        log::warn!("no virtual keyboard event sender");
-                                    }
-                                }
+            Message::Key { action, pressed } => {
+                match action {
+                    layout::Action::None => {}
+                    layout::Action::Keycode(kc) => {
+                        match &self.vke_tx {
+                            Some(vke_tx) => {
+                                //TODO: run in task
+                                vke_tx.send(VkEvent::Key(kc, pressed)).unwrap();
                             }
-                            layout::Action::Layer(layer) => {
-                                if layer < layout.layers.len() {
-                                    self.layer = layer;
-                                } else {
-                                    log::warn!("invalid layer {}", layer);
-                                }
+                            None => {
+                                log::warn!("no virtual keyboard event sender");
                             }
                         }
                     }
                 }
+            }
+            Message::Layer(layer) => {
+                self.layer = layer;
             }
             Message::Layout(layout) => {
                 let mut height = 0;
@@ -224,18 +209,21 @@ impl Application for App {
             .and_then(|layout| layout.layers.get(self.layer))
         {
             let mut grid = widget::column::with_capacity(layout_layer.rows.len());
-            for (row, layout_row) in layout_layer.rows.iter().enumerate() {
+            for layout_row in layout_layer.rows.iter() {
                 let mut r = widget::row::with_capacity(layout_row.len());
-                for (col, key) in layout_row.iter().enumerate() {
+                for key in layout_row.iter() {
                     r = r.push(
                         widget::container(
                             widget::button::custom(
                                 widget::container(widget::text(&key.name)).center(Length::Fill),
                             )
-                            .on_press(Message::Button {
-                                layer: self.layer,
-                                row,
-                                col,
+                            .on_press_down(Message::Key {
+                                action: key.action,
+                                pressed: true,
+                            })
+                            .on_press(Message::Key {
+                                action: key.action,
+                                pressed: false,
                             }),
                         )
                         .padding(self.key_padding as u16)
@@ -262,17 +250,14 @@ impl Application for App {
             stream::channel(100, |mut output| async move {
                 //TODO: can this be made simpler?
                 tokio::task::spawn_blocking(move || {
-                    let (vke_tx, layout_rx) = vk_channels();
+                    let (vke_tx, msg_rx) = vk_channels();
                     futures::executor::block_on(async {
                         output.send(Message::VkeTx(vke_tx)).await
                     })
                     .unwrap();
                     loop {
-                        let layout = layout_rx.recv().unwrap();
-                        futures::executor::block_on(async {
-                            output.send(Message::Layout(layout)).await
-                        })
-                        .unwrap();
+                        let msg = msg_rx.recv().unwrap();
+                        futures::executor::block_on(async { output.send(msg).await }).unwrap();
                     }
                 })
                 .await

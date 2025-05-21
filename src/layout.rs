@@ -2,11 +2,10 @@
 
 use xkbcommon::xkb;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Action {
     None,
     Keycode(xkb::Keycode),
-    Layer(usize),
 }
 
 #[derive(Clone, Debug)]
@@ -78,7 +77,6 @@ impl From<&xkb::Keymap> for Layout {
                 match keymap.key_by_name(key) {
                     Some(kc) => {
                         normal_key.action = Action::Keycode(kc);
-                        //TODO: actually trigger shift
                         shift_key.action = Action::Keycode(kc);
 
                         let normal_syms = keymap.key_get_syms_by_level(kc, 0, 0);

@@ -17,7 +17,7 @@ use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
 };
 use xkbcommon::xkb;
 
-use crate::layout::Layout;
+use crate::{Message, layout::Layout};
 
 pub use xkb::Keycode;
 
@@ -26,9 +26,9 @@ pub enum VkEvent {
     Key(Keycode, bool),
 }
 
-pub fn vk_channels() -> (channel::Sender<VkEvent>, channel::Channel<Layout>) {
+pub fn vk_channels() -> (channel::Sender<VkEvent>, channel::Channel<Message>) {
     let (vke_tx, vke_rx) = channel::channel();
-    let (layout_tx, layout_rx) = channel::channel();
+    let (msg_tx, msg_rx) = channel::channel();
 
     //TODO: get errors from thread?
     thread::spawn(move || {
@@ -48,14 +48,14 @@ pub fn vk_channels() -> (channel::Sender<VkEvent>, channel::Channel<Layout>) {
                     let Some(vk) = &seat.vk else {
                         continue;
                     };
-                    let Some(state) = &mut seat.state else {
+                    let Some(xkb) = &mut seat.state else {
                         continue;
                     };
                     //TODO: What happens on time rollover?
                     let time = timer.elapsed().as_millis() as u32;
                     match vke {
                         VkEvent::Key(kc, pressed) => {
-                            let comps = state.update_key(
+                            let comps = xkb.update_key(
                                 kc,
                                 if pressed {
                                     xkb::KeyDirection::Down
@@ -65,9 +65,12 @@ pub fn vk_channels() -> (channel::Sender<VkEvent>, channel::Channel<Layout>) {
                             );
                             //TODO: check comps bits
                             if comps & xkb::STATE_MODS_EFFECTIVE > 0 {
-                                let mods = state.serialize_mods(comps);
+                                let mods = xkb.serialize_mods(comps);
                                 println!("{:#x}: {:#x}", comps, mods);
                                 vk.modifiers(mods, 0, 0, 0);
+
+                                //TODO: is it sane to do per-key check of level?
+                                //TODO: send layer state: state.msg_tx.send(Message::Layer(layer)).unwrap();
                             }
                             vk.key(
                                 time,
@@ -95,7 +98,7 @@ pub fn vk_channels() -> (channel::Sender<VkEvent>, channel::Channel<Layout>) {
             .unwrap();
 
         let mut state = State {
-            layout_tx,
+            msg_tx,
             seats: HashMap::new(),
             vkm: None,
             xkb_ctx: xkb::Context::new(0),
@@ -103,7 +106,7 @@ pub fn vk_channels() -> (channel::Sender<VkEvent>, channel::Channel<Layout>) {
         while let Ok(_) = event_loop.dispatch(None, &mut state) {}
     });
 
-    (vke_tx, layout_rx)
+    (vke_tx, msg_rx)
 }
 
 struct Seat {
@@ -114,7 +117,7 @@ struct Seat {
 }
 
 struct State {
-    layout_tx: channel::Sender<Layout>,
+    msg_tx: channel::Sender<Message>,
     seats: HashMap<u32, Seat>,
     vkm: Option<ZwpVirtualKeyboardManagerV1>,
     xkb_ctx: xkb::Context,
@@ -216,8 +219,11 @@ impl Dispatch<WlKeyboard, u32> for State {
                         println!("mod {}", modifier);
                     }
 
-                    state.layout_tx.send(Layout::from(&keymap)).unwrap();
                     seat.state = Some(xkb::State::new(&keymap));
+                    state
+                        .msg_tx
+                        .send(Message::Layout(Layout::from(&keymap)))
+                        .unwrap();
                 }
                 Ok(None) => {
                     eprintln!("no keymap found");
