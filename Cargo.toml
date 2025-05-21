@@ -4,9 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+calloop = "0.14"
+calloop-wayland-source = "0.4"
 env_logger = "0.11"
 log = "0.4"
 serde = { version = "1", features = ["serde_derive"] }
+tokio = { version = "1", features = ["rt"] }
+wayland-client = "0.31"
+wayland-protocols-misc = { version = "0.3", features = ["client"] }
+xkbcommon = "0.8"
 # Internationalization
 icu_collator = "1.5"
 icu_provider = { version = "1.5", features = ["sync"] }
@@ -17,4 +23,4 @@ rust-embed = "8"
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic"
 default-features = false
-features = ["multi-window", "wayland", "winit"]
+features = ["multi-window", "tokio", "wayland", "winit"]
