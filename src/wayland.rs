@@ -23,8 +23,7 @@ pub use xkb::Keycode;
 
 #[derive(Clone, Copy, Debug)]
 pub enum VkEvent {
-    KeyPress(Keycode),
-    KeyRelease(Keycode),
+    Key(Keycode, bool),
 }
 
 pub fn vk_channels() -> (channel::Sender<VkEvent>, channel::Channel<Layout>) {
@@ -45,24 +44,41 @@ pub fn vk_channels() -> (channel::Sender<VkEvent>, channel::Channel<Layout>) {
                 };
                 //TODO: retry keys once seat and vk are available?
                 //TODO: which seat should be used?
-                let Some(vk) = state
-                    .seats
-                    .iter()
-                    .find_map(|(_seat_id, seat)| seat.vk.as_ref())
-                else {
-                    eprintln!("no seat with virtual keyboard found");
+                for (_id, seat) in state.seats.iter_mut() {
+                    let Some(vk) = &seat.vk else {
+                        continue;
+                    };
+                    let Some(state) = &mut seat.state else {
+                        continue;
+                    };
+                    //TODO: What happens on time rollover?
+                    let time = timer.elapsed().as_millis() as u32;
+                    match vke {
+                        VkEvent::Key(kc, pressed) => {
+                            let comps = state.update_key(
+                                kc,
+                                if pressed {
+                                    xkb::KeyDirection::Down
+                                } else {
+                                    xkb::KeyDirection::Up
+                                },
+                            );
+                            //TODO: check comps bits
+                            if comps & xkb::STATE_MODS_EFFECTIVE > 0 {
+                                let mods = state.serialize_mods(comps);
+                                println!("{:#x}: {:#x}", comps, mods);
+                                vk.modifiers(mods, 0, 0, 0);
+                            }
+                            vk.key(
+                                time,
+                                u32::from(kc.raw().checked_sub(8).unwrap()),
+                                if pressed { 1 } else { 0 },
+                            );
+                        }
+                    }
                     return;
-                };
-                //TODO: What happens on time rollover?
-                let time = timer.elapsed().as_millis() as u32;
-                match vke {
-                    VkEvent::KeyPress(kc) => {
-                        vk.key(time, u32::from(kc.raw().checked_sub(8).unwrap()), 1);
-                    }
-                    VkEvent::KeyRelease(kc) => {
-                        vk.key(time, u32::from(kc.raw().checked_sub(8).unwrap()), 0);
-                    }
                 }
+                eprintln!("no seat with virtual keyboard found");
             })
             .unwrap();
 
@@ -93,7 +109,7 @@ pub fn vk_channels() -> (channel::Sender<VkEvent>, channel::Channel<Layout>) {
 struct Seat {
     wl: WlSeat,
     keyboard: Option<WlKeyboard>,
-    keymap: Option<xkb::Keymap>,
+    state: Option<xkb::State>,
     vk: Option<ZwpVirtualKeyboardV1>,
 }
 
@@ -126,7 +142,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                     Seat {
                         wl: registry.bind(name, version, qh, name),
                         keyboard: None,
-                        keymap: None,
+                        state: None,
                         vk: None,
                     },
                 );
@@ -161,6 +177,11 @@ impl Dispatch<WlKeyboard, u32> for State {
                 eprintln!("seat {seat} not found");
                 return;
             };
+            if seat.vk.is_some() {
+                //TODO: allow resetting if the physical keyboard's layout was reset
+                eprintln!("refusing to reset virtual keyboard keymap");
+                return;
+            }
             let vk = seat
                 .vk
                 .get_or_insert_with(|| vkm.create_virtual_keyboard(&seat.wl, qh, ()));
@@ -175,7 +196,6 @@ impl Dispatch<WlKeyboard, u32> for State {
                 )
             } {
                 Ok(Some(keymap)) => {
-                    /*
                     for layout in 0..keymap.num_layouts() {
                         println!("layout {}: {}", layout, keymap.layout_get_name(layout));
                         for kc_raw in keymap.min_keycode().raw()..=keymap.max_keycode().raw() {
@@ -183,16 +203,21 @@ impl Dispatch<WlKeyboard, u32> for State {
                             print!("  keycode {:?} {:?}:", kc, keymap.key_get_name(kc));
                             for level in 0..keymap.num_levels_for_key(kc, layout) {
                                 for ks in keymap.key_get_syms_by_level(kc, layout, level) {
-                                    print!(" {:?} ({:?})", ks, ks.key_char());
+                                    print!(" {:?} ({:?})", ks, xkb::keysym_get_name(*ks));
                                 }
                             }
                             println!();
                         }
+                        // Only show first layout for now
+                        break;
                     }
-                    */
+
+                    for modifier in keymap.mods() {
+                        println!("mod {}", modifier);
+                    }
 
                     state.layout_tx.send(Layout::from(&keymap)).unwrap();
-                    seat.keymap = Some(keymap);
+                    seat.state = Some(xkb::State::new(&keymap));
                 }
                 Ok(None) => {
                     eprintln!("no keymap found");

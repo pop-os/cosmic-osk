@@ -7,7 +7,7 @@ use cosmic::{
     cosmic_config::{self, CosmicConfigEntry},
     executor,
     iced::{
-        Alignment, Length, Limits, Subscription,
+        Length, Limits, Subscription,
         futures::{self, sink::SinkExt},
         platform_specific::{
             runtime::wayland::layer_surface::{IcedMargin, IcedOutput, SctkLayerSurfaceSettings},
@@ -89,6 +89,8 @@ pub struct App {
     core: Core,
     config_handler: Option<cosmic_config::Config>,
     config: Config,
+    key_padding: usize,
+    key_size: usize,
     layout: Option<Layout>,
     layer: usize,
     surface_id: Option<WindowId>,
@@ -123,6 +125,8 @@ impl Application for App {
             core,
             config_handler: flags.config_handler,
             config: flags.config,
+            key_padding: 4,
+            key_size: 64,
             layer: 0,
             layout: None,
             surface_id: None,
@@ -149,8 +153,8 @@ impl Application for App {
                                 match &self.vke_tx {
                                     Some(vke_tx) => {
                                         //TODO: run in task
-                                        vke_tx.send(VkEvent::KeyPress(kc)).unwrap();
-                                        vke_tx.send(VkEvent::KeyRelease(kc)).unwrap();
+                                        vke_tx.send(VkEvent::Key(kc, true)).unwrap();
+                                        vke_tx.send(VkEvent::Key(kc, false)).unwrap();
                                     }
                                     None => {
                                         log::warn!("no virtual keyboard event sender");
@@ -169,18 +173,9 @@ impl Application for App {
                 }
             }
             Message::Layout(layout) => {
-                let mut max_height = 0;
+                let mut height = 0;
                 for layer in layout.layers.iter() {
-                    let mut height = 16; // 8 padding top and bottom
-                    for (row, _) in layer.rows.iter().enumerate() {
-                        if row > 0 {
-                            height += 8; // 8 spacing
-                        }
-                        height += 64;
-                    }
-                    if height > max_height {
-                        max_height = height;
-                    }
+                    height = height.max((self.key_size + self.key_padding * 2) * layer.rows.len());
                 }
 
                 self.layer = 0;
@@ -198,15 +193,15 @@ impl Application for App {
                         anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
                         output: IcedOutput::Active,
                         namespace: "cosmic-osk".into(),
-                        size: Some((None, Some(max_height))),
+                        size: Some((None, Some(height as u32))),
                         margin: IcedMargin {
                             top: 0,
                             bottom: 0,
                             left: 0,
                             right: 0,
                         },
-                        exclusive_zone: max_height as i32,
-                        size_limits: Limits::NONE.min_width(320.0).min_height(max_height as f32),
+                        exclusive_zone: height as i32,
+                        size_limits: Limits::NONE.min_width(320.0).min_height(height as f32),
                     });
                 }
             }
@@ -228,25 +223,24 @@ impl Application for App {
             .as_ref()
             .and_then(|layout| layout.layers.get(self.layer))
         {
-            let mut grid = widget::column::with_capacity(layout_layer.rows.len())
-                .align_x(Alignment::Center)
-                .spacing(8.0);
+            let mut grid = widget::column::with_capacity(layout_layer.rows.len());
             for (row, layout_row) in layout_layer.rows.iter().enumerate() {
-                let mut r = widget::row::with_capacity(layout_row.len())
-                    .align_y(Alignment::Center)
-                    .spacing(8.0);
+                let mut r = widget::row::with_capacity(layout_row.len());
                 for (col, key) in layout_row.iter().enumerate() {
                     r = r.push(
-                        widget::button::custom(
-                            widget::container(widget::text(&key.name)).center(Length::Fill),
+                        widget::container(
+                            widget::button::custom(
+                                widget::container(widget::text(&key.name)).center(Length::Fill),
+                            )
+                            .on_press(Message::Button {
+                                layer: self.layer,
+                                row,
+                                col,
+                            }),
                         )
-                        .height(Length::Fixed(64.0))
-                        .width(Length::Fixed(64.0 * key.width))
-                        .on_press(Message::Button {
-                            layer: self.layer,
-                            row,
-                            col,
-                        }),
+                        .padding(self.key_padding as u16)
+                        .height(Length::Fixed(self.key_size as f32))
+                        .width(Length::Fixed(self.key_size as f32 * key.width)),
                     );
                 }
                 grid = grid.push(r);
@@ -256,7 +250,7 @@ impl Application for App {
             widget::text(format!("missing layout")).into()
         };
         widget::container(element)
-            .class(style::Container::WindowBackground)
+            .class(style::Container::Background)
             .center(Length::Fill)
             .into()
     }
