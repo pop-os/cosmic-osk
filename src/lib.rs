@@ -217,6 +217,8 @@ impl Application for App {
                             widget::button::custom(
                                 widget::container(widget::text(&key.name)).center(Length::Fill),
                             )
+                            //TODO: use custom style?
+                            .class(style::Button::MenuItem)
                             .on_press_down(Message::Key {
                                 action: key.action,
                                 pressed: true,
