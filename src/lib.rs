@@ -12,7 +12,7 @@ use cosmic::{
         platform_specific::{
             runtime::wayland::layer_surface::{IcedMargin, IcedOutput, SctkLayerSurfaceSettings},
             shell::wayland::commands::layer_surface::{
-                Anchor, KeyboardInteractivity, Layer, destroy_layer_surface, get_layer_surface,
+                Anchor, KeyboardInteractivity, Layer, get_layer_surface,
             },
         },
         stream,
@@ -31,6 +31,8 @@ pub mod layout;
 pub mod localize;
 
 use wayland::{VkEvent, vk_channels};
+
+use crate::wayland::KeyModifiers;
 pub mod wayland;
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -82,13 +84,14 @@ pub enum Message {
     },
     Layer(usize),
     Layout(Layout),
+    Modifier(KeyModifiers),
     VkeTx(channel::Sender<VkEvent>),
 }
 
 pub struct App {
     core: Core,
-    config_handler: Option<cosmic_config::Config>,
-    config: Config,
+    _config_handler: Option<cosmic_config::Config>,
+    _config: Config,
     key_padding: usize,
     key_size: usize,
     layout: Option<Layout>,
@@ -123,8 +126,8 @@ impl Application for App {
     fn init(core: Core, flags: Self::Flags) -> (Self, Task<Self::Message>) {
         let app = App {
             core,
-            config_handler: flags.config_handler,
-            config: flags.config,
+            _config_handler: flags.config_handler,
+            _config: flags.config,
             key_padding: 4,
             key_size: 64,
             layer: 0,
@@ -163,7 +166,6 @@ impl Application for App {
                     height = height.max((self.key_size + self.key_padding * 2) * layer.rows.len());
                 }
 
-                self.layer = 0;
                 self.layout = Some(layout);
 
                 //TODO: destroy and recreate surface when layout changes?
@@ -190,6 +192,12 @@ impl Application for App {
                     });
                 }
             }
+            Message::Modifier(modifier) => {
+                // TODO: implement layers properly
+                // WARN: capslock does not behave like shift for symbols...
+                let shift = (modifier.shift as u32) ^ (modifier.capslock as u32);
+                self.layer = shift as usize;
+            }
             Message::VkeTx(vke_tx) => {
                 self.vke_tx = Some(vke_tx);
             }
@@ -198,11 +206,11 @@ impl Application for App {
         Task::none()
     }
 
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Element<'_, Message> {
         unimplemented!()
     }
 
-    fn view_window(&self, id: WindowId) -> Element<Message> {
+    fn view_window(&self, _id: WindowId) -> Element<'_, Message> {
         let element: Element<_> = if let Some(layout_layer) = self
             .layout
             .as_ref()
@@ -218,6 +226,7 @@ impl Application for App {
                                 widget::container(widget::text(&key.name)).center(Length::Fill),
                             )
                             //TODO: use custom style?
+                            //WARN: causes sticky buttons when typing "wrong"
                             .class(style::Button::MenuItem)
                             .on_press_down(Message::Key {
                                 action: key.action,
@@ -230,11 +239,12 @@ impl Application for App {
                         )
                         .padding(self.key_padding as u16)
                         .height(Length::Fixed(self.key_size as f32))
-                        .width(Length::Fixed(self.key_size as f32 * key.width)),
+                        .width(Length::FillPortion((key.width * 4.0) as u16)),
                     );
                 }
                 grid = grid.push(r);
             }
+            grid = grid.max_width(1200.0);
             grid.into()
         } else {
             widget::text(format!("missing layout")).into()

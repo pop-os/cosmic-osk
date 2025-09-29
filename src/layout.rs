@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use xkbcommon::xkb;
+use xkbcommon::xkb::{self, Keycode};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Action {
@@ -93,6 +93,7 @@ impl From<&xkb::Keymap> for Layout {
                         }
 
                         let shift_syms = keymap.key_get_syms_by_level(kc, 0, 1);
+                        // let t = keymap.key_get_sysms_by;
                         if let Some(shift_sym) = shift_syms.get(0) {
                             shift_key.name = xkb::keysym_get_name(*shift_sym);
                             if let Some(shift_char) = shift_sym.key_char() {
@@ -135,6 +136,7 @@ impl From<&xkb::Keymap> for Layout {
                 if let Some((name, width)) = name_width {
                     normal_key.name = name.to_string();
                     normal_key.width = width;
+
                     shift_key.name = name.to_string();
                     shift_key.width = width;
                 }
@@ -148,5 +150,22 @@ impl From<&xkb::Keymap> for Layout {
         Layout {
             layers: vec![normal_layer, shift_layer],
         }
+    }
+}
+
+impl Layout {
+    pub fn get_keycode(&self, name: &str) -> Option<&Keycode> {
+        let result: Option<&xkb::Keycode> = self.layers[0]
+            .rows
+            .iter()
+            .chain(self.layers[1].rows.iter())
+            .flatten()
+            .find(|key| key.name == name)
+            .and_then(|key| match &key.action {
+                Action::Keycode(kc) => Some(kc),
+                Action::None => None,
+            });
+
+        result
     }
 }

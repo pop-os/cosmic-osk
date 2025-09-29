@@ -15,11 +15,38 @@ use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
     zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1,
     zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1,
 };
-use xkbcommon::xkb;
+use xkbcommon::xkb::{self};
 
 use crate::{Message, layout::Layout};
 
 pub use xkb::Keycode;
+pub use xkb::keysyms;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct KeyModifiers {
+    pub shift: bool,
+    pub capslock: bool,
+    pub control: bool,
+}
+impl KeyModifiers {
+    pub fn empty() -> Self {
+        Self {
+            shift: false,
+            capslock: false,
+            control: false,
+        }
+    }
+    pub fn from_mask(mask: u32, keymap: &xkb::Keymap) -> Self {
+        let shift_offset = keymap.mod_get_index("Shift");
+        let lock_offset = keymap.mod_get_index("Lock");
+        let control_offset = keymap.mod_get_index("Control");
+        Self {
+            shift: (mask >> shift_offset) & 0b1 == 1,
+            capslock: (mask >> lock_offset) & 0b1 == 1,
+            control: (mask >> control_offset) & 0b1 == 1,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum VkEvent {
@@ -66,6 +93,13 @@ pub fn vk_channels() -> (channel::Sender<VkEvent>, channel::Channel<Message>) {
                             //TODO: check comps bits
                             if comps & xkb::STATE_MODS_EFFECTIVE > 0 {
                                 let mods = xkb.serialize_mods(comps);
+                                // let is_caps_lock = xkb.mod_name_is_active(name, type_)
+                                let key_modifiers =
+                                    KeyModifiers::from_mask(mods, &xkb.get_keymap());
+                                if key_modifiers != state.modifiers {
+                                    state.modifiers = key_modifiers;
+                                    let _ = state.msg_tx.send(Message::Modifier(key_modifiers));
+                                }
                                 println!("{:#x}: {:#x}", comps, mods);
                                 vk.modifiers(mods, 0, 0, 0);
 
@@ -102,6 +136,7 @@ pub fn vk_channels() -> (channel::Sender<VkEvent>, channel::Channel<Message>) {
             seats: HashMap::new(),
             vkm: None,
             xkb_ctx: xkb::Context::new(0),
+            modifiers: KeyModifiers::empty(),
         };
         while let Ok(_) = event_loop.dispatch(None, &mut state) {}
     });
@@ -116,11 +151,12 @@ struct Seat {
     vk: Option<ZwpVirtualKeyboardV1>,
 }
 
-struct State {
+pub struct State {
     msg_tx: channel::Sender<Message>,
     seats: HashMap<u32, Seat>,
     vkm: Option<ZwpVirtualKeyboardManagerV1>,
     xkb_ctx: xkb::Context,
+    modifiers: KeyModifiers,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for State {
