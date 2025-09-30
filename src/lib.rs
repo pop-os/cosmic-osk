@@ -2,7 +2,7 @@
 
 use calloop::channel;
 use cosmic::{
-    Application, Element,
+    Action, Application, Element,
     app::{Core, Settings, Task},
     cosmic_config::{self, CosmicConfigEntry},
     executor,
@@ -18,6 +18,7 @@ use cosmic::{
         stream,
         window::Id as WindowId,
     },
+    iced_winit::commands::layer_surface::set_size,
     style, widget,
 };
 use std::any::TypeId;
@@ -86,6 +87,8 @@ pub enum Message {
     Layout(Layout),
     Modifier(KeyModifiers),
     VkeTx(channel::Sender<VkEvent>),
+    ChangeLayoutSize,
+    ToggleLayout,
 }
 
 pub struct App {
@@ -98,6 +101,7 @@ pub struct App {
     layer: usize,
     surface_id: Option<WindowId>,
     vke_tx: Option<channel::Sender<VkEvent>>,
+    is_full_layout: bool,
 }
 
 /// Implement [`cosmic::Application`] to integrate with COSMIC.
@@ -134,6 +138,7 @@ impl Application for App {
             layout: None,
             surface_id: None,
             vke_tx: None,
+            is_full_layout: false,
         };
 
         (app, Task::none())
@@ -155,42 +160,66 @@ impl Application for App {
                             }
                         }
                     }
+                    layout::Action::ToggleLayout => {
+                        if pressed {
+                            return Task::done(Action::App(Message::ToggleLayout));
+                        }
+                    }
+                }
+            }
+            Message::ToggleLayout => {
+                self.is_full_layout = !self.is_full_layout;
+                return Task::done(Action::App(Message::ChangeLayoutSize));
+            }
+            Message::ChangeLayoutSize => {
+                let mut height = 0;
+                let Some(layout) = &self.layout else {
+                    return Task::none();
+                };
+                let layers = match self.is_full_layout {
+                    true => &layout.full_layers,
+                    false => &layout.partial_layers,
+                };
+                for layer in layers.iter() {
+                    height = height.max((self.key_size + self.key_padding * 2) * layer.rows.len());
+                }
+                match self.surface_id {
+                    None => {
+                        let surface_id = WindowId::unique();
+                        self.surface_id = Some(surface_id);
+                        return get_layer_surface(SctkLayerSurfaceSettings {
+                            id: surface_id,
+                            layer: Layer::Top,
+                            keyboard_interactivity: KeyboardInteractivity::None,
+                            pointer_interactivity: true,
+                            anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
+                            output: IcedOutput::Active,
+                            namespace: "cosmic-osk".into(),
+                            size: Some((None, Some(height as u32))),
+                            margin: IcedMargin {
+                                top: 0,
+                                bottom: 0,
+                                left: 0,
+                                right: 0,
+                            },
+                            exclusive_zone: height as i32,
+                            size_limits: Limits::NONE.min_width(320.0).min_height(height as f32),
+                        });
+                    }
+                    Some(id) => {
+                        // let task = window::resize(id, Size::new(1000.0, height as f32));
+                        // let task = window::update()
+                        let task = set_size(id, None, Some(height as u32));
+                        return task;
+                    }
                 }
             }
             Message::Layer(layer) => {
                 self.layer = layer;
             }
             Message::Layout(layout) => {
-                let mut height = 0;
-                for layer in layout.layers.iter() {
-                    height = height.max((self.key_size + self.key_padding * 2) * layer.rows.len());
-                }
-
                 self.layout = Some(layout);
-
-                //TODO: destroy and recreate surface when layout changes?
-                if !self.surface_id.is_some() {
-                    let surface_id = WindowId::unique();
-                    self.surface_id = Some(surface_id);
-                    return get_layer_surface(SctkLayerSurfaceSettings {
-                        id: surface_id,
-                        layer: Layer::Top,
-                        keyboard_interactivity: KeyboardInteractivity::None,
-                        pointer_interactivity: true,
-                        anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
-                        output: IcedOutput::Active,
-                        namespace: "cosmic-osk".into(),
-                        size: Some((None, Some(height as u32))),
-                        margin: IcedMargin {
-                            top: 0,
-                            bottom: 0,
-                            left: 0,
-                            right: 0,
-                        },
-                        exclusive_zone: height as i32,
-                        size_limits: Limits::NONE.min_width(320.0).min_height(height as f32),
-                    });
-                }
+                return Task::done(Action::App(Message::ChangeLayoutSize));
             }
             Message::Modifier(modifier) => {
                 // TODO: implement layers properly
@@ -211,44 +240,7 @@ impl Application for App {
     }
 
     fn view_window(&self, _id: WindowId) -> Element<'_, Message> {
-        let element: Element<_> = if let Some(layout_layer) = self
-            .layout
-            .as_ref()
-            .and_then(|layout| layout.layers.get(self.layer))
-        {
-            let mut grid = widget::column::with_capacity(layout_layer.rows.len());
-            for layout_row in layout_layer.rows.iter() {
-                let mut r = widget::row::with_capacity(layout_row.len());
-                for key in layout_row.iter() {
-                    r = r.push(
-                        widget::container(
-                            widget::button::custom(
-                                widget::container(widget::text(&key.name)).center(Length::Fill),
-                            )
-                            //TODO: use custom style?
-                            //WARN: causes sticky buttons when typing "wrong"
-                            .class(style::Button::MenuItem)
-                            .on_press_down(Message::Key {
-                                action: key.action,
-                                pressed: true,
-                            })
-                            .on_press(Message::Key {
-                                action: key.action,
-                                pressed: false,
-                            }),
-                        )
-                        .padding(self.key_padding as u16)
-                        .height(Length::Fixed(self.key_size as f32))
-                        .width(Length::FillPortion((key.width * 4.0) as u16)),
-                    );
-                }
-                grid = grid.push(r);
-            }
-            grid = grid.max_width(1200.0);
-            grid.into()
-        } else {
-            widget::text(format!("missing layout")).into()
-        };
+        let element = self.create_keyboard(self.is_full_layout);
         widget::container(element)
             .class(style::Container::Background)
             .center(Length::Fill)
@@ -276,5 +268,51 @@ impl Application for App {
                 .unwrap()
             }),
         )
+    }
+}
+
+impl App {
+    fn create_keyboard(&self, full: bool) -> Element<'_, Message> {
+        let Some(layout) = self.layout.as_ref() else {
+            return widget::text(format!("missing layout")).into();
+        };
+        let layers = match full {
+            true => &layout.full_layers,
+            false => &layout.partial_layers,
+        };
+        let Some(layout_layer) = layers.get(self.layer) else {
+            return widget::text(format!("missing layer")).into();
+        };
+
+        let mut grid = widget::column::with_capacity(layout_layer.rows.len());
+        for layout_row in layout_layer.rows.iter() {
+            let mut r = widget::row::with_capacity(layout_row.len());
+            for key in layout_row.iter() {
+                r = r.push(
+                    widget::container(
+                        widget::button::custom(
+                            widget::container(widget::text(&key.name)).center(Length::Fill),
+                        )
+                        //TODO: use custom style?
+                        .class(style::Button::MenuItem)
+                        //WARN: causes sticky buttons when typing "wrong"
+                        .on_press_down(Message::Key {
+                            action: key.action,
+                            pressed: true,
+                        })
+                        .on_press(Message::Key {
+                            action: key.action,
+                            pressed: false,
+                        }),
+                    )
+                    .padding(self.key_padding as u16)
+                    .height(Length::Fixed(self.key_size as f32))
+                    .width(Length::FillPortion(key.width as u16)),
+                );
+            }
+            grid = grid.push(r);
+        }
+        grid = grid.max_width(1200.0);
+        grid.into()
     }
 }
