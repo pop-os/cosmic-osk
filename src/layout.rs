@@ -1,17 +1,185 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use xkbcommon::xkb;
+const FULL_KEY_ROWS: &'static [&'static [(&'static str, u8)]] = &[
+    &[
+        ("ESC", 8),
+        ("FK01", 8),
+        ("FK02", 8),
+        ("FK03", 8),
+        ("FK04", 8),
+        ("FK05", 8),
+        ("FK06", 8),
+        ("FK07", 8),
+        ("FK08", 8),
+        ("FK09", 8),
+        ("FK10", 8),
+        ("FK11", 8),
+        ("FK12", 8),
+        ("DELE", 16),
+        ("HOME", 8),
+    ],
+    &[
+        ("TLDE", 8),
+        ("AE01", 8),
+        ("AE02", 8),
+        ("AE03", 8),
+        ("AE04", 8),
+        ("AE05", 8),
+        ("AE06", 8),
+        ("AE07", 8),
+        ("AE08", 8),
+        ("AE09", 8),
+        ("AE10", 8),
+        ("AE11", 8),
+        ("AE12", 8),
+        ("BKSP", 16),
+        ("PGUP", 8),
+    ],
+    &[
+        ("TAB", 12),
+        ("AD01", 8),
+        ("AD02", 8),
+        ("AD03", 8),
+        ("AD04", 8),
+        ("AD05", 8),
+        ("AD06", 8),
+        ("AD07", 8),
+        ("AD08", 8),
+        ("AD09", 8),
+        ("AD10", 8),
+        ("AD11", 8),
+        ("AD12", 8),
+        ("BKSL", 12),
+        ("PGDN", 8),
+    ],
+    &[
+        ("CAPS", 14),
+        ("AC01", 8),
+        ("AC02", 8),
+        ("AC03", 8),
+        ("AC04", 8),
+        ("AC05", 8),
+        ("AC06", 8),
+        ("AC07", 8),
+        ("AC08", 8),
+        ("AC09", 8),
+        ("AC10", 8),
+        ("AC11", 8),
+        ("RTRN", 18),
+        ("END", 8),
+    ],
+    &[
+        ("LFSH", 18),
+        ("AB01", 8),
+        ("AB02", 8),
+        ("AB03", 8),
+        ("AB04", 8),
+        ("AB05", 8),
+        ("AB06", 8),
+        ("AB07", 8),
+        ("AB08", 8),
+        ("AB09", 8),
+        ("AB10", 8),
+        ("RTSH", 14),
+        ("UP", 8),
+        ("INS", 8),
+    ],
+    &[
+        ("LCTL", 10),
+        ("LALT", 10),
+        ("LWIN", 10),
+        ("SPCE", 38),
+        ("TGLLAYOUT", 8),
+        ("RALT", 10),
+        ("RWIN", 10),
+        ("RCTL", 10),
+        ("LEFT", 8),
+        ("DOWN", 8),
+        ("RGHT", 8),
+    ],
+];
+const PARTIAL_KEY_ROWS: &'static [&'static [(&'static str, u8)]] = &[
+    &[
+        ("ESC", 8),
+        ("AE01", 8),
+        ("AE02", 8),
+        ("AE03", 8),
+        ("AE04", 8),
+        ("AE05", 8),
+        ("AE06", 8),
+        ("AE07", 8),
+        ("AE08", 8),
+        ("AE09", 8),
+        ("AE10", 8),
+        ("BKSP", 10),
+    ],
+    &[
+        ("AB10", 8),
+        ("AD01", 8),
+        ("AD02", 8),
+        ("AD03", 8),
+        ("AD04", 8),
+        ("AD05", 8),
+        ("AD06", 8),
+        ("AD07", 8),
+        ("AD08", 8),
+        ("AD09", 8),
+        ("AD10", 8),
+        ("AB09", 8),
+    ],
+    &[
+        ("TAB", 12),
+        ("AC01", 8),
+        ("AC02", 8),
+        ("AC03", 8),
+        ("AC04", 8),
+        ("AC05", 8),
+        ("AC06", 8),
+        ("AC07", 8),
+        ("AC08", 8),
+        ("AC09", 8),
+        ("AC11", 8),
+        ("RTRN", 12),
+    ],
+    &[
+        ("CAPS", 16),
+        ("AB01", 8),
+        ("AB02", 8),
+        ("AB03", 8),
+        ("AB04", 8),
+        ("AB05", 8),
+        ("AB06", 8),
+        ("AB07", 8),
+        ("AB08", 8),
+        ("AB09", 8),
+        ("UP", 8),
+        ("AB10", 8),
+    ],
+    &[
+        ("LCTL", 2),
+        ("LALT", 2),
+        ("LWIN", 2),
+        ("SPCE", 4),
+        ("TGLLAYOUT", 2),
+        ("LEFT", 1),
+        ("DOWN", 1),
+        ("RGHT", 1),
+    ],
+];
+
+use xkbcommon::xkb::{self, Keycode};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Action {
     None,
+    ToggleLayout,
     Keycode(xkb::Keycode),
 }
 
 #[derive(Clone, Debug)]
 pub struct Key {
     pub name: String,
-    pub width: f32,
+    pub width: u8,
     pub action: Action,
 }
 
@@ -22,7 +190,9 @@ pub struct Layer {
 
 #[derive(Clone, Debug, Default)]
 pub struct Layout {
-    pub layers: Vec<Layer>,
+    pub full_layers: Vec<Layer>,
+    // smaller
+    pub partial_layers: Vec<Layer>,
 }
 
 impl From<&xkb::Keymap> for Layout {
@@ -31,122 +201,124 @@ impl From<&xkb::Keymap> for Layout {
             return Layout::default();
         }
 
-        let key_rows: &'static [&'static [&'static str]] = &[
-            &[
-                "ESC", "FK01", "FK02", "FK03", "FK04", "FK05", "FK06", "FK07", "FK08", "FK09",
-                "FK10", "FK11", "FK12", "DELE", "HOME",
-            ],
-            &[
-                "TLDE", "AE01", "AE02", "AE03", "AE04", "AE05", "AE06", "AE07", "AE08", "AE09",
-                "AE10", "AE11", "AE12", "BKSP", "PGUP",
-            ],
-            &[
-                "TAB", "AD01", "AD02", "AD03", "AD04", "AD05", "AD06", "AD07", "AD08", "AD09",
-                "AD10", "AD11", "AD12", "BKSL", "PGDN",
-            ],
-            &[
-                "CAPS", "AC01", "AC02", "AC03", "AC04", "AC05", "AC06", "AC07", "AC08", "AC09",
-                "AC10", "AC11", "RTRN", "END",
-            ],
-            &[
-                "LFSH", "AB01", "AB02", "AB03", "AB04", "AB05", "AB06", "AB07", "AB08", "AB09",
-                "AB10", "RTSH", "UP", "INS",
-            ],
-            &[
-                "LCTL", "LALT", "LWIN", "SPCE", "RALT", "RWIN", "RCTL", "LEFT", "DOWN", "RGHT",
-            ],
-        ];
+        let (full_normal_layer, full_shift_layer) = get_layers(keymap, FULL_KEY_ROWS);
+        let (partial_normal_layer, partial_shift_layer) = get_layers(keymap, PARTIAL_KEY_ROWS);
+        Layout {
+            full_layers: vec![full_normal_layer, full_shift_layer],
+            partial_layers: vec![partial_normal_layer, partial_shift_layer],
+        }
+    }
+}
 
-        let mut normal_layer = Layer::default();
-        let mut shift_layer = Layer::default();
-        for key_row in key_rows.iter() {
-            let mut normal_row = Vec::with_capacity(key_row.len());
-            let mut shift_row = Vec::with_capacity(key_row.len());
-            for &key in key_row.iter() {
-                let mut normal_key = Key {
-                    name: key.to_string(),
-                    width: 1.0,
-                    action: Action::None,
-                };
-                let mut shift_key = Key {
-                    name: key.to_string(),
-                    width: 1.0,
-                    action: Action::None,
-                };
+fn get_layers(keymap: &xkb::Keymap, rows: &[&[(&str, u8)]]) -> (Layer, Layer) {
+    let mut normal_layer = Layer::default();
+    let mut shift_layer = Layer::default();
+    for key_row in rows.iter() {
+        let mut normal_row = Vec::with_capacity(key_row.len());
+        let mut shift_row = Vec::with_capacity(key_row.len());
+        for (key, size) in key_row.iter() {
+            let mut normal_key = Key {
+                name: key.to_string(),
+                width: *size,
+                action: Action::None,
+            };
+            let mut shift_key = Key {
+                name: key.to_string(),
+                width: *size,
+                action: Action::None,
+            };
 
-                match keymap.key_by_name(key) {
-                    Some(kc) => {
-                        normal_key.action = Action::Keycode(kc);
-                        shift_key.action = Action::Keycode(kc);
+            match keymap.key_by_name(key) {
+                Some(kc) => {
+                    normal_key.action = Action::Keycode(kc);
+                    shift_key.action = Action::Keycode(kc);
 
-                        let normal_syms = keymap.key_get_syms_by_level(kc, 0, 0);
-                        if let Some(normal_sym) = normal_syms.get(0) {
-                            normal_key.name = xkb::keysym_get_name(*normal_sym);
-                            if let Some(normal_char) = normal_sym.key_char() {
-                                if !normal_char.is_control() {
-                                    normal_key.name = normal_char.to_string();
-                                }
+                    let normal_syms = keymap.key_get_syms_by_level(kc, 0, 0);
+                    if let Some(normal_sym) = normal_syms.get(0) {
+                        normal_key.name = xkb::keysym_get_name(*normal_sym);
+                        if let Some(normal_char) = normal_sym.key_char() {
+                            if !normal_char.is_control() {
+                                normal_key.name = normal_char.to_string();
                             }
-
-                            // Copy normal key name over by default
-                            shift_key.name = normal_key.name.clone();
                         }
 
-                        let shift_syms = keymap.key_get_syms_by_level(kc, 0, 1);
-                        if let Some(shift_sym) = shift_syms.get(0) {
-                            shift_key.name = xkb::keysym_get_name(*shift_sym);
-                            if let Some(shift_char) = shift_sym.key_char() {
-                                if !shift_char.is_control() {
-                                    shift_key.name = shift_char.to_string();
-                                }
+                        // Copy normal key name over by default
+                        shift_key.name = normal_key.name.clone();
+                    }
+
+                    let shift_syms = keymap.key_get_syms_by_level(kc, 0, 1);
+                    if let Some(shift_sym) = shift_syms.get(0) {
+                        shift_key.name = xkb::keysym_get_name(*shift_sym);
+                        if let Some(shift_char) = shift_sym.key_char() {
+                            if !shift_char.is_control() {
+                                shift_key.name = shift_char.to_string();
                             }
                         }
                     }
-                    None => {
+                }
+                None => {
+                    if key == &"TGLLAYOUT" {
+                        normal_key.action = Action::ToggleLayout;
+                        shift_key.action = Action::ToggleLayout;
+                    } else {
                         eprintln!("cannot find keycode for {:?} in keymap", key);
                     }
                 }
-
-                let name_width = match key {
-                    "BKSL" => {
-                        normal_key.width = 1.5;
-                        shift_key.width = 1.5;
-                        None
-                    }
-                    "BKSP" => Some(("Bksp", 2.0)),
-                    "DELE" => Some(("Del", 2.0)),
-                    "CAPS" => Some(("Caps", 1.75)),
-                    "ESC" => Some(("Esc", 1.0)),
-                    "LALT" => Some(("Alt", 1.25)),
-                    "LCTL" => Some(("Ctrl", 1.25)),
-                    "LFSH" => Some(("Shift", 2.25)),
-                    "LWIN" => Some(("Super", 1.25)),
-                    "PGDN" => Some(("PgDn", 1.0)),
-                    "PGUP" => Some(("PgUp", 1.0)),
-                    "RALT" => Some(("Alt", 1.25)),
-                    "RCTL" => Some(("Ctrl", 1.25)),
-                    "RTSH" => Some(("Shift", 1.75)),
-                    "RTRN" => Some(("Enter", 2.25)),
-                    "RWIN" => Some(("Super", 1.25)),
-                    "SPCE" => Some((" ", 5.5)),
-                    "TAB" => Some(("Tab", 1.5)),
-                    _ => None,
-                };
-                if let Some((name, width)) = name_width {
-                    normal_key.name = name.to_string();
-                    normal_key.width = width;
-                    shift_key.name = name.to_string();
-                    shift_key.width = width;
-                }
-
-                normal_row.push(normal_key);
-                shift_row.push(shift_key);
             }
-            normal_layer.rows.push(normal_row);
-            shift_layer.rows.push(shift_row);
+
+            let name: Option<&str> = match *key {
+                "BKSP" => Some("⌫"),
+                "DELE" => Some("Del"),
+                "CAPS" => Some("Caps"),
+                "ESC" => Some("Esc"),
+                "LALT" => Some("Alt"),
+                "LCTL" => Some("Ctrl"),
+                "LFSH" => Some("Shift"),
+                "LWIN" => Some("Sup"),
+                "PGDN" => Some("PgDn"),
+                "PGUP" => Some("PgUp"),
+                "RALT" => Some("Alt"),
+                "RCTL" => Some("Ctrl"),
+                "RTSH" => Some("Shift"),
+                "RTRN" => Some("⏎"),
+                "RWIN" => Some("Super"),
+                "SPCE" => Some(" "),
+                "TAB" => Some("Tab"),
+                "UP" => Some("↑"),
+                "DOWN" => Some("↓"),
+                "RGHT" => Some("→"),
+                "LEFT" => Some("←"),
+                "TGLLAYOUT" => Some("⇔"),
+                _ => None,
+            };
+
+            if let Some(name) = name {
+                normal_key.name = name.to_string();
+                shift_key.name = name.to_string();
+            }
+
+            normal_row.push(normal_key);
+            shift_row.push(shift_key);
         }
-        Layout {
-            layers: vec![normal_layer, shift_layer],
-        }
+        normal_layer.rows.push(normal_row);
+        shift_layer.rows.push(shift_row);
+    }
+    (normal_layer, shift_layer)
+}
+
+impl Layout {
+    pub fn get_keycode(&self, name: &str) -> Option<&Keycode> {
+        let result: Option<&xkb::Keycode> = self.full_layers[0]
+            .rows
+            .iter()
+            .chain(self.full_layers[1].rows.iter())
+            .flatten()
+            .find(|key| key.name == name)
+            .and_then(|key| match &key.action {
+                Action::Keycode(kc) => Some(kc),
+                _ => None,
+            });
+
+        result
     }
 }
