@@ -18,7 +18,7 @@ use cosmic::{
         stream,
         window::Id as WindowId,
     },
-    iced_winit::commands::layer_surface::set_size,
+    iced_winit::commands::layer_surface::destroy_layer_surface,
     style, widget,
 };
 use std::any::TypeId;
@@ -132,7 +132,7 @@ impl Application for App {
             core,
             _config_handler: flags.config_handler,
             _config: flags.config,
-            key_padding: 4,
+            key_padding: 2,
             key_size: 64,
             layer: 0,
             layout: None,
@@ -183,36 +183,32 @@ impl Application for App {
                 for layer in layers.iter() {
                     height = height.max((self.key_size + self.key_padding * 2) * layer.rows.len());
                 }
-                match self.surface_id {
-                    None => {
-                        let surface_id = WindowId::unique();
-                        self.surface_id = Some(surface_id);
-                        return get_layer_surface(SctkLayerSurfaceSettings {
-                            id: surface_id,
-                            layer: Layer::Top,
-                            keyboard_interactivity: KeyboardInteractivity::None,
-                            pointer_interactivity: true,
-                            anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
-                            output: IcedOutput::Active,
-                            namespace: "cosmic-osk".into(),
-                            size: Some((None, Some(height as u32))),
-                            margin: IcedMargin {
-                                top: 0,
-                                bottom: 0,
-                                left: 0,
-                                right: 0,
-                            },
-                            exclusive_zone: height as i32,
-                            size_limits: Limits::NONE.min_width(320.0).min_height(height as f32),
-                        });
-                    }
-                    Some(id) => {
-                        // let task = window::resize(id, Size::new(1000.0, height as f32));
-                        // let task = window::update()
-                        let task = set_size(id, None, Some(height as u32));
-                        return task;
-                    }
+                let mut destroy_task = Task::none();
+                if let Some(id) = self.surface_id {
+                    destroy_task = destroy_layer_surface(id);
                 }
+                let surface_id = WindowId::unique();
+                self.surface_id = Some(surface_id);
+                let create_task = get_layer_surface(SctkLayerSurfaceSettings {
+                    id: surface_id,
+                    layer: Layer::Top,
+                    keyboard_interactivity: KeyboardInteractivity::None,
+                    pointer_interactivity: true,
+                    anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
+                    output: IcedOutput::Active,
+                    namespace: "cosmic-osk".into(),
+                    size: Some((None, Some(height as u32))),
+                    margin: IcedMargin {
+                        top: 0,
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                    },
+                    exclusive_zone: height as i32,
+                    size_limits: Limits::NONE.min_width(320.0).min_height(height as f32),
+                });
+
+                return destroy_task.chain(create_task);
             }
             Message::Layer(layer) => {
                 self.layer = layer;

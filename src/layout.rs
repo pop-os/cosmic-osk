@@ -100,7 +100,7 @@ const FULL_KEY_ROWS: &'static [&'static [(&'static str, u8)]] = &[
 ];
 const PARTIAL_KEY_ROWS: &'static [&'static [(&'static str, u8)]] = &[
     &[
-        ("ESC", 6),
+        ("ESC", 8),
         ("AE01", 8),
         ("AE02", 8),
         ("AE03", 8),
@@ -111,6 +111,7 @@ const PARTIAL_KEY_ROWS: &'static [&'static [(&'static str, u8)]] = &[
         ("AE08", 8),
         ("AE09", 8),
         ("AE10", 8),
+        ("BKSP", 10),
     ],
     &[
         ("AB10", 8),
@@ -155,14 +156,14 @@ const PARTIAL_KEY_ROWS: &'static [&'static [(&'static str, u8)]] = &[
         ("AB10", 8),
     ],
     &[
-        ("LCTL", 6),
+        ("LCTL", 2),
         ("LALT", 2),
         ("LWIN", 2),
-        ("SPCE", 8),
+        ("SPCE", 4),
         ("TGLLAYOUT", 2),
-        ("LEFT", 3),
-        ("DOWN", 3),
-        ("RGHT", 3),
+        ("LEFT", 1),
+        ("DOWN", 1),
+        ("RGHT", 1),
     ],
 ];
 
@@ -266,24 +267,28 @@ fn get_layers(keymap: &xkb::Keymap, rows: &[&[(&str, u8)]]) -> (Layer, Layer) {
             }
 
             let name: Option<&str> = match *key {
-                "BKSP" => Some("Bksp"),
+                "BKSP" => Some("⌫"),
                 "DELE" => Some("Del"),
                 "CAPS" => Some("Caps"),
                 "ESC" => Some("Esc"),
                 "LALT" => Some("Alt"),
                 "LCTL" => Some("Ctrl"),
                 "LFSH" => Some("Shift"),
-                "LWIN" => Some("Super"),
+                "LWIN" => Some("Sup"),
                 "PGDN" => Some("PgDn"),
                 "PGUP" => Some("PgUp"),
                 "RALT" => Some("Alt"),
                 "RCTL" => Some("Ctrl"),
                 "RTSH" => Some("Shift"),
-                "RTRN" => Some("Enter"),
+                "RTRN" => Some("⏎"),
                 "RWIN" => Some("Super"),
                 "SPCE" => Some(" "),
                 "TAB" => Some("Tab"),
-                "TGLLAYOUT" => Some("<->"),
+                "UP" => Some("↑"),
+                "DOWN" => Some("↓"),
+                "RGHT" => Some("→"),
+                "LEFT" => Some("←"),
+                "TGLLAYOUT" => Some("⇔"),
                 _ => None,
             };
 
