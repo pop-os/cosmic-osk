@@ -83,7 +83,6 @@ pub enum Message {
         action: layout::Action,
         pressed: bool,
     },
-    Layer(usize),
     Layout(Layout),
     Modifier(KeyModifiers),
     VkeTx(channel::Sender<VkEvent>),
@@ -210,9 +209,6 @@ impl Application for App {
 
                 return destroy_task.chain(create_task);
             }
-            Message::Layer(layer) => {
-                self.layer = layer;
-            }
             Message::Layout(layout) => {
                 self.layout = Some(layout);
                 return Task::done(Action::App(Message::ChangeLayoutSize));
@@ -236,7 +232,7 @@ impl Application for App {
     }
 
     fn view_window(&self, _id: WindowId) -> Element<'_, Message> {
-        let element = self.create_keyboard(self.is_full_layout);
+        let element = self.create_keyboard();
         widget::container(element)
             .class(style::Container::Background)
             .center(Length::Fill)
@@ -268,11 +264,11 @@ impl Application for App {
 }
 
 impl App {
-    fn create_keyboard(&self, full: bool) -> Element<'_, Message> {
+    fn create_keyboard(&self) -> Element<'_, Message> {
         let Some(layout) = self.layout.as_ref() else {
             return widget::text(format!("missing layout")).into();
         };
-        let layers = match full {
+        let layers = match self.is_full_layout {
             true => &layout.full_layers,
             false => &layout.partial_layers,
         };
