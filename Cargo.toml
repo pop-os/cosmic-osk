@@ -11,6 +11,7 @@ log = "0.4"
 serde = { version = "1", features = ["serde_derive"] }
 tokio = { version = "1", features = ["rt"] }
 wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client"] }
 wayland-protocols-misc = { version = "0.3", features = ["client"] }
 xkbcommon = "0.8"
 # Internationalization
@@ -19,6 +20,9 @@ icu_provider = { version = "1.5", features = ["sync"] }
 i18n-embed = { version = "0.15", features = ["fluent-system", "desktop-requester"] }
 i18n-embed-fl = "0.9"
 rust-embed = "8"
+
+[dev-dependencies]
+tempfile = "3"
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic"

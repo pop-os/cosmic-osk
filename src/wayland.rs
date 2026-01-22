@@ -11,9 +11,15 @@ use wayland_client::{
         wl_seat::{self, WlSeat},
     },
 };
-use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
-    zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1,
-    zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1,
+use wayland_protocols_misc::{
+    zwp_input_method_v2::client::{
+        zwp_input_method_manager_v2::ZwpInputMethodManagerV2,
+        zwp_input_method_v2::{self, ZwpInputMethodV2},
+    },
+    zwp_virtual_keyboard_v1::client::{
+        zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1,
+        zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1,
+    },
 };
 use xkbcommon::xkb;
 
@@ -24,6 +30,11 @@ pub use xkb::Keycode;
 #[derive(Clone, Copy, Debug)]
 pub enum VkEvent {
     Key(Keycode, bool),
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct VkState {
+    pub active: bool,
 }
 
 pub fn vk_channels() -> (channel::Sender<VkEvent>, channel::Channel<Message>) {
@@ -100,6 +111,7 @@ pub fn vk_channels() -> (channel::Sender<VkEvent>, channel::Channel<Message>) {
         let mut state = State {
             msg_tx,
             seats: HashMap::new(),
+            imm: None,
             vkm: None,
             xkb_ctx: xkb::Context::new(0),
         };
@@ -113,12 +125,15 @@ struct Seat {
     wl: WlSeat,
     keyboard: Option<WlKeyboard>,
     state: Option<xkb::State>,
+    im: Option<ZwpInputMethodV2>,
     vk: Option<ZwpVirtualKeyboardV1>,
+    vk_state: VkState,
 }
 
 struct State {
     msg_tx: channel::Sender<Message>,
     seats: HashMap<u32, Seat>,
+    imm: Option<ZwpInputMethodManagerV2>,
     vkm: Option<ZwpVirtualKeyboardManagerV1>,
     xkb_ctx: xkb::Context,
 }
@@ -146,9 +161,15 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                         wl: registry.bind(name, version, qh, name),
                         keyboard: None,
                         state: None,
+                        im: None,
                         vk: None,
+                        vk_state: Default::default(),
                     },
                 );
+            } else if interface == ZwpInputMethodManagerV2::interface().name {
+                eprintln!("Input Method Interface");
+                assert!(state.imm.is_none());
+                state.imm = Some(registry.bind(name, version, qh, ()));
             } else if interface == ZwpVirtualKeyboardManagerV1::interface().name {
                 eprintln!("Virtual Keyboard Interface");
                 assert!(state.vkm.is_none());
@@ -163,21 +184,25 @@ impl Dispatch<WlKeyboard, u32> for State {
         state: &mut Self,
         _: &WlKeyboard,
         event: <WlKeyboard as Proxy>::Event,
-        &seat: &u32,
+        &seat_id: &u32,
         _: &Connection,
         qh: &QueueHandle<Self>,
     ) {
         use wayland_client::protocol::wl_keyboard::Event;
 
-        eprintln!("Keyboard event: {event:?}");
+        eprintln!("Keyboard event {seat_id}: {event:?}");
         //TODO: why is this event called on every keypress?
         if let Event::Keymap { format, fd, size } = event {
+            let Some(ref imm) = state.imm else {
+                eprintln!("no input method manager found");
+                return;
+            };
             let Some(ref vkm) = state.vkm else {
                 eprintln!("no virtual keyboard manager found");
                 return;
             };
-            let Some(seat) = state.seats.get_mut(&seat) else {
-                eprintln!("seat {seat} not found");
+            let Some(seat) = state.seats.get_mut(&seat_id) else {
+                eprintln!("seat {seat_id} not found");
                 return;
             };
             if seat.vk.is_some() {
@@ -185,6 +210,9 @@ impl Dispatch<WlKeyboard, u32> for State {
                 eprintln!("refusing to reset virtual keyboard keymap");
                 return;
             }
+            let im = seat
+                .im
+                .get_or_insert_with(|| imm.get_input_method(&seat.wl, qh, seat_id));
             let vk = seat
                 .vk
                 .get_or_insert_with(|| vkm.create_virtual_keyboard(&seat.wl, qh, ()));
@@ -241,26 +269,26 @@ impl Dispatch<WlSeat, u32> for State {
         state: &mut Self,
         wl_seat: &WlSeat,
         event: <WlSeat as Proxy>::Event,
-        &id: &u32,
+        &seat_id: &u32,
         _: &Connection,
         qh: &QueueHandle<Self>,
     ) {
         use wl_seat::Event;
-        eprintln!("Seat event: {event:?}");
+        eprintln!("Seat {seat_id} event: {event:?}");
         match event {
             Event::Capabilities { capabilities } => {
                 let WEnum::Value(caps) = capabilities else {
-                    eprintln!("invalid seat {id} capabilities {capabilities:?}");
+                    eprintln!("invalid seat {seat_id} capabilities {capabilities:?}");
                     return;
                 };
                 if caps.contains(wl_seat::Capability::Keyboard) {
-                    eprintln!("Seat {id} keyboard");
-                    let Some(seat) = state.seats.get_mut(&id) else {
-                        eprintln!("failed to find seat {id}");
+                    eprintln!("Seat {seat_id} keyboard");
+                    let Some(seat) = state.seats.get_mut(&seat_id) else {
+                        eprintln!("failed to find seat {seat_id}");
                         return;
                     };
                     assert!(seat.keyboard.is_none());
-                    seat.keyboard = Some(wl_seat.get_keyboard(qh, id));
+                    seat.keyboard = Some(wl_seat.get_keyboard(qh, seat_id));
                 }
             }
             _ => {}
@@ -268,5 +296,40 @@ impl Dispatch<WlSeat, u32> for State {
     }
 }
 
+impl Dispatch<ZwpInputMethodV2, u32> for State {
+    fn event(
+        state: &mut Self,
+        wl_seat: &ZwpInputMethodV2,
+        event: zwp_input_method_v2::Event,
+        &seat_id: &u32,
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        use zwp_input_method_v2::Event;
+        eprintln!("Input method {seat_id}: {:?}", event);
+        let Some(seat) = state.seats.get_mut(&seat_id) else {
+            eprintln!("seat {seat_id} not found");
+            return;
+        };
+        match event {
+            Event::Activate => {
+                seat.vk_state.active = true;
+            }
+            Event::Deactivate => {
+                seat.vk_state.active = false;
+            }
+            Event::Done => {
+                state
+                    .msg_tx
+                    .send(Message::VkState(seat_id, seat.vk_state))
+                    .unwrap();
+            }
+            //TODO: handle more events
+            _ => {}
+        }
+    }
+}
+
+delegate_noop!(State: ZwpInputMethodManagerV2);
 delegate_noop!(State: ZwpVirtualKeyboardManagerV1);
 delegate_noop!(State: ZwpVirtualKeyboardV1);

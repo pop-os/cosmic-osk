@@ -1085,8 +1085,10 @@ dependencies = [
  "log",
  "rust-embed",
  "serde",
+ "tempfile",
  "tokio",
  "wayland-client",
+ "wayland-protocols",
  "wayland-protocols-misc",
  "xkbcommon 0.8.0",
 ]

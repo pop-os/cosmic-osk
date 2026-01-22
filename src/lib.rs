@@ -20,7 +20,7 @@ use cosmic::{
     },
     style, widget,
 };
-use std::any::TypeId;
+use std::{any::TypeId, collections::HashMap};
 
 use config::{CONFIG_VERSION, Config};
 pub mod config;
@@ -30,7 +30,7 @@ pub mod layout;
 
 pub mod localize;
 
-use wayland::{VkEvent, vk_channels};
+use wayland::{VkEvent, VkState, vk_channels};
 pub mod wayland;
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -83,6 +83,7 @@ pub enum Message {
     Layer(usize),
     Layout(Layout),
     VkeTx(channel::Sender<VkEvent>),
+    VkState(u32, VkState),
 }
 
 pub struct App {
@@ -95,6 +96,7 @@ pub struct App {
     layer: usize,
     surface_id: Option<WindowId>,
     vke_tx: Option<channel::Sender<VkEvent>>,
+    vk_state: HashMap<u32, VkState>,
 }
 
 /// Implement [`cosmic::Application`] to integrate with COSMIC.
@@ -131,6 +133,7 @@ impl Application for App {
             layout: None,
             surface_id: None,
             vke_tx: None,
+            vk_state: HashMap::new(),
         };
 
         (app, Task::none())
@@ -192,6 +195,10 @@ impl Application for App {
             }
             Message::VkeTx(vke_tx) => {
                 self.vke_tx = Some(vke_tx);
+            }
+            Message::VkState(seat_id, vk_state) => {
+                eprintln!("{}: {:?}", seat_id, vk_state);
+                self.vk_state.insert(seat_id, vk_state);
             }
         }
 
