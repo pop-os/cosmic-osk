@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use calloop::channel;
+use xkbcommon::xkb;
+
 use cosmic::{
     Application, Element,
     app::{Core, Settings, Task},
@@ -8,30 +9,26 @@ use cosmic::{
     executor,
     iced::{
         Length, Limits, Subscription,
-        futures::{self, sink::SinkExt},
         platform_specific::{
             runtime::wayland::layer_surface::{IcedMargin, IcedOutput, SctkLayerSurfaceSettings},
             shell::wayland::commands::layer_surface::{
                 Anchor, KeyboardInteractivity, Layer, destroy_layer_surface, get_layer_surface,
             },
         },
-        stream,
         window::Id as WindowId,
     },
     style, widget,
 };
-use std::{any::TypeId, collections::HashMap};
 
 use config::{CONFIG_VERSION, Config};
 pub mod config;
+
+mod ei;
 
 use layout::Layout;
 pub mod layout;
 
 pub mod localize;
-
-use wayland::{VkEvent, VkState, vk_channels};
-pub mod wayland;
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
@@ -81,9 +78,7 @@ pub enum Message {
         pressed: bool,
     },
     Layer(usize),
-    Layout(Layout),
-    VkeTx(channel::Sender<VkEvent>),
-    VkState(u32, VkState),
+    Ei(ei::Msg),
 }
 
 pub struct App {
@@ -95,8 +90,9 @@ pub struct App {
     layout: Option<Layout>,
     layer: usize,
     surface_id: Option<WindowId>,
-    vke_tx: Option<channel::Sender<VkEvent>>,
-    vk_state: HashMap<u32, VkState>,
+    // TODO reis state
+    ei_conn: Option<reis::event::Connection>,
+    ei_keyboard: Option<(reis::ei::Device, reis::ei::Keyboard)>,
 }
 
 /// Implement [`cosmic::Application`] to integrate with COSMIC.
@@ -132,8 +128,8 @@ impl Application for App {
             layer: 0,
             layout: None,
             surface_id: None,
-            vke_tx: None,
-            vk_state: HashMap::new(),
+            ei_conn: None,
+            ei_keyboard: None,
         };
 
         (app, Task::none())
@@ -145,14 +141,18 @@ impl Application for App {
                 match action {
                     layout::Action::None => {}
                     layout::Action::Keycode(kc) => {
-                        match &self.vke_tx {
-                            Some(vke_tx) => {
-                                //TODO: run in task
-                                vke_tx.send(VkEvent::Key(kc, pressed)).unwrap();
-                            }
-                            None => {
-                                log::warn!("no virtual keyboard event sender");
-                            }
+                        // TODO send key to reis
+                        if let Some((device, keyboard)) = &self.ei_keyboard {
+                            let kc = u32::from(kc) - 8;
+                            let state = if pressed {
+                                reis::ei::keyboard::KeyState::Press
+                            } else {
+                                reis::ei::keyboard::KeyState::Released
+                            };
+                            keyboard.key(kc, state);
+                            // TODO device frame
+                            device.frame(0, 1); // TODO
+                            self.ei_conn.as_ref().unwrap().flush();
                         }
                     }
                 }
@@ -160,45 +160,76 @@ impl Application for App {
             Message::Layer(layer) => {
                 self.layer = layer;
             }
-            Message::Layout(layout) => {
-                let mut height = 0;
-                for layer in layout.layers.iter() {
-                    height = height.max((self.key_size + self.key_padding * 2) * layer.rows.len());
-                }
+            Message::Ei(evt) => {
+                match evt {
+                    // TODO handle modifiers
+                    ei::Msg::Connection(conn) => {
+                        self.ei_conn = Some(conn);
+                    }
+                    ei::Msg::Event(reis::event::EiEvent::SeatAdded(evt)) => {
+                        use reis::event::DeviceCapability;
+                        evt.seat
+                            .bind_capabilities(DeviceCapability::Keyboard.into());
+                        let _ = self.ei_conn.as_ref().unwrap().flush();
+                    }
+                    ei::Msg::Event(reis::event::EiEvent::DeviceAdded(evt)) => {
+                        self.ei_keyboard = Some((
+                            evt.device.device().clone(),
+                            evt.device.interface::<reis::ei::Keyboard>().unwrap(),
+                        ));
+                        let serial = self.ei_conn.as_ref().unwrap().serial();
+                        evt.device.device().start_emulating(0, serial);
+                        let keymap = evt.device.keymap().unwrap();
+                        let ctx = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+                        let layout = Layout::from(&unsafe {
+                            xkb::Keymap::new_from_fd(
+                                &ctx,
+                                keymap.fd.try_clone().unwrap(),
+                                keymap.size as usize,
+                                xkb::KEYMAP_FORMAT_TEXT_V1,
+                                xkb::KEYMAP_COMPILE_NO_FLAGS,
+                            )
+                            .unwrap()
+                            .unwrap()
+                        });
 
-                self.layer = 0;
-                self.layout = Some(layout);
+                        let mut height = 0;
+                        for layer in layout.layers.iter() {
+                            height = height
+                                .max((self.key_size + self.key_padding * 2) * layer.rows.len());
+                        }
 
-                //TODO: destroy and recreate surface when layout changes?
-                if !self.surface_id.is_some() {
-                    let surface_id = WindowId::unique();
-                    self.surface_id = Some(surface_id);
-                    return get_layer_surface(SctkLayerSurfaceSettings {
-                        id: surface_id,
-                        layer: Layer::Top,
-                        keyboard_interactivity: KeyboardInteractivity::None,
-                        pointer_interactivity: true,
-                        anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
-                        output: IcedOutput::Active,
-                        namespace: "cosmic-osk".into(),
-                        size: Some((None, Some(height as u32))),
-                        margin: IcedMargin {
-                            top: 0,
-                            bottom: 0,
-                            left: 0,
-                            right: 0,
-                        },
-                        exclusive_zone: height as i32,
-                        size_limits: Limits::NONE.min_width(320.0).min_height(height as f32),
-                    });
+                        self.layer = 0;
+                        self.layout = Some(layout);
+
+                        //TODO: destroy and recreate surface when layout changes?
+                        if !self.surface_id.is_some() {
+                            let surface_id = WindowId::unique();
+                            self.surface_id = Some(surface_id);
+                            return get_layer_surface(SctkLayerSurfaceSettings {
+                                id: surface_id,
+                                layer: Layer::Top,
+                                keyboard_interactivity: KeyboardInteractivity::None,
+                                pointer_interactivity: true,
+                                anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
+                                output: IcedOutput::Active,
+                                namespace: "cosmic-osk".into(),
+                                size: Some((None, Some(height as u32))),
+                                margin: IcedMargin {
+                                    top: 0,
+                                    bottom: 0,
+                                    left: 0,
+                                    right: 0,
+                                },
+                                exclusive_zone: height as i32,
+                                size_limits: Limits::NONE
+                                    .min_width(320.0)
+                                    .min_height(height as f32),
+                            });
+                        }
+                    }
+                    _ => {}
                 }
-            }
-            Message::VkeTx(vke_tx) => {
-                self.vke_tx = Some(vke_tx);
-            }
-            Message::VkState(seat_id, vk_state) => {
-                eprintln!("{}: {:?}", seat_id, vk_state);
-                self.vk_state.insert(seat_id, vk_state);
             }
         }
 
@@ -253,25 +284,6 @@ impl Application for App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        struct VkSubscription;
-        Subscription::run_with_id(
-            TypeId::of::<VkSubscription>(),
-            stream::channel(100, |mut output| async move {
-                //TODO: can this be made simpler?
-                tokio::task::spawn_blocking(move || {
-                    let (vke_tx, msg_rx) = vk_channels();
-                    futures::executor::block_on(async {
-                        output.send(Message::VkeTx(vke_tx)).await
-                    })
-                    .unwrap();
-                    loop {
-                        let msg = msg_rx.recv().unwrap();
-                        futures::executor::block_on(async { output.send(msg).await }).unwrap();
-                    }
-                })
-                .await
-                .unwrap()
-            }),
-        )
+        ei::subscription().map(Message::Ei)
     }
 }
