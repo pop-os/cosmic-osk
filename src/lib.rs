@@ -4,7 +4,7 @@ use cosmic::{
     Application, Element,
     app::{Core, Settings, Task},
     cosmic_config::{self, CosmicConfigEntry},
-    executor,
+    cosmic_theme, executor,
     iced::{
         Length, Limits, Subscription,
         platform_specific::{
@@ -18,7 +18,7 @@ use cosmic::{
     theme, widget,
 };
 use reis::ei::keyboard::KeyState;
-use std::collections::HashSet;
+use std::{collections::HashSet, process};
 use xkbcommon::xkb;
 
 use config::{CONFIG_VERSION, Config};
@@ -79,6 +79,7 @@ pub enum Message {
         keycode: layout::KeyCode,
         pressed: bool,
     },
+    Quit,
     Ei(ei::Msg),
 }
 
@@ -220,6 +221,9 @@ impl Application for App {
                     xkb_state.mod_name_is_active(xkb::MOD_NAME_CAPS, xkb::STATE_MODS_EFFECTIVE);
                 self.layer = if shift != caps { 1 } else { 0 };
             }
+            Message::Quit => {
+                process::exit(0);
+            }
             Message::Ei(evt) => {
                 match evt {
                     // TODO handle modifiers
@@ -272,7 +276,7 @@ impl Application for App {
                                 id: surface_id,
                                 layer: Layer::Top,
                                 keyboard_interactivity: KeyboardInteractivity::None,
-                                pointer_interactivity: true,
+                                input_zone: None,
                                 anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
                                 output: IcedOutput::Active,
                                 namespace: "cosmic-osk".into(),
@@ -303,14 +307,28 @@ impl Application for App {
     }
 
     fn view_window(&self, id: WindowId) -> Element<Message> {
+        let cosmic_theme::Spacing {
+            space_s,
+            space_xs,
+            space_xxs,
+            ..
+        } = theme::spacing();
+
         let element: Element<_> = if let Some(layout_layer) = self
             .layout
             .as_ref()
             .and_then(|layout| layout.layers.get(self.layer))
         {
-            let mut grid = widget::column::with_capacity(layout_layer.rows.len());
+            let mut grid = widget::column::with_capacity(layout_layer.rows.len() + 1);
+            grid = grid.push(widget::row::with_children(vec![
+                widget::space().width(Length::Fill).into(),
+                widget::button::icon(widget::icon::from_name("window-close-symbolic"))
+                    .on_press(Message::Quit)
+                    .into(),
+            ]));
             for layout_row in layout_layer.rows.iter() {
-                let mut r = widget::row::with_capacity(layout_row.len());
+                let mut r = widget::row::with_capacity(layout_row.len() + 2);
+                r = r.push(widget::space().width(Length::Fill));
                 for key in layout_row.iter() {
                     let mut selected = false;
                     if let Some(kc) = key.keycode {
@@ -330,20 +348,22 @@ impl Application for App {
                         }
                     }
                     //TODO: adjust to match design
-                    let style = if selected {
+                    let style = {
                         use widget::button::Catalog;
-                        fn adjust(
-                            theme: &cosmic::Theme,
-                            mut style: widget::button::Style,
-                        ) -> widget::button::Style {
+                        let adjust = move |theme: &cosmic::Theme,
+                                           mut style: widget::button::Style|
+                              -> widget::button::Style {
                             let cosmic = theme.cosmic();
-                            style.overlay = Some(cosmic::iced::Background::Color(
-                                cosmic.button.selected_state_color().into(),
-                            ));
-                            style.text_color = Some(cosmic.accent_text_color().into());
-                            style.icon_color = style.text_color;
+                            if selected {
+                                style.overlay = Some(cosmic::iced::Background::Color(
+                                    cosmic.button.selected_state_color().into(),
+                                ));
+                                style.text_color = Some(cosmic.accent_text_color().into());
+                                style.icon_color = style.text_color;
+                            }
+                            style.border_radius = cosmic.radius_s().into();
                             style
-                        }
+                        };
                         theme::Button::Custom {
                             active: Box::new(move |focused, theme| {
                                 adjust(
@@ -367,8 +387,6 @@ impl Application for App {
                                 )
                             }),
                         }
-                    } else {
-                        theme::Button::MenuItem
                     };
                     let mut button = widget::button::custom(
                         widget::container(if selected {
@@ -379,7 +397,9 @@ impl Application for App {
                         .center(Length::Fill),
                     )
                     .class(style)
-                    .selected(selected);
+                    .selected(selected)
+                    .width(Length::Fill)
+                    .height(Length::Fill);
                     if let Some(keycode) = key.keycode {
                         button = button
                             .on_press_down(Message::Key {
@@ -400,6 +420,7 @@ impl Application for App {
                             .width(Length::Fixed(self.key_size as f32 * key.width)),
                     );
                 }
+                r = r.push(widget::space().width(Length::Fill));
                 grid = grid.push(r);
             }
             grid.into()
@@ -407,6 +428,7 @@ impl Application for App {
             widget::text(format!("missing layout")).into()
         };
         widget::container(element)
+            .padding([space_xxs, space_s, space_xs, space_s])
             .class(theme::Container::Background)
             .center(Length::Fill)
             .into()
