@@ -330,29 +330,53 @@ impl Application for App {
                         }
                     }
                     //TODO: adjust to match design
-                    let style = {
+                    let style = if selected {
                         use widget::button::Catalog;
+                        fn adjust(
+                            theme: &cosmic::Theme,
+                            mut style: widget::button::Style,
+                        ) -> widget::button::Style {
+                            let cosmic = theme.cosmic();
+                            style.overlay = Some(cosmic::iced::Background::Color(
+                                cosmic.button.selected_state_color().into(),
+                            ));
+                            style.text_color = Some(cosmic.accent_text_color().into());
+                            style.icon_color = style.text_color;
+                            style
+                        }
                         theme::Button::Custom {
                             active: Box::new(move |focused, theme| {
-                                if selected {
-                                    theme.pressed(focused, selected, &theme::Button::MenuItem)
-                                } else {
-                                    theme.active(focused, selected, &theme::Button::MenuItem)
-                                }
+                                adjust(
+                                    theme,
+                                    theme.active(focused, selected, &theme::Button::MenuItem),
+                                )
                             }),
                             disabled: Box::new(move |theme| {
-                                theme.disabled(&theme::Button::MenuItem)
+                                adjust(theme, theme.disabled(&theme::Button::MenuItem))
                             }),
                             hovered: Box::new(move |focused, theme| {
-                                theme.hovered(focused, selected, &theme::Button::MenuItem)
+                                adjust(
+                                    theme,
+                                    theme.hovered(focused, selected, &theme::Button::MenuItem),
+                                )
                             }),
                             pressed: Box::new(move |focused, theme| {
-                                theme.pressed(focused, selected, &theme::Button::MenuItem)
+                                adjust(
+                                    theme,
+                                    theme.pressed(focused, selected, &theme::Button::MenuItem),
+                                )
                             }),
                         }
+                    } else {
+                        theme::Button::MenuItem
                     };
                     let mut button = widget::button::custom(
-                        widget::container(widget::text(&key.name)).center(Length::Fill),
+                        widget::container(if selected {
+                            widget::text::heading(&key.name)
+                        } else {
+                            widget::text::body(&key.name)
+                        })
+                        .center(Length::Fill),
                     )
                     .class(style)
                     .selected(selected);
