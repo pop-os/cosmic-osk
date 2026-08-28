@@ -2,17 +2,38 @@
 
 use xkbcommon::xkb;
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct KeyCode(xkb::Keycode);
+
+impl KeyCode {
+    pub fn xkb(&self) -> xkb::Keycode {
+        self.0
+    }
+
+    pub fn evdev(&self) -> u32 {
+        u32::from(self.0)
+            .checked_sub(8)
+            .expect("XKB keycode should be greater than 8")
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
-pub enum Action {
-    None,
-    Keycode(xkb::Keycode),
+pub enum KeyKind {
+    Mod {
+        // Name of modifier
+        name: &'static str,
+        // Sticky or not
+        sticky: bool,
+    },
+    Normal,
 }
 
 #[derive(Clone, Debug)]
 pub struct Key {
     pub name: String,
+    pub kind: KeyKind,
     pub width: f32,
-    pub action: Action,
+    pub keycode: Option<KeyCode>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -63,21 +84,50 @@ impl From<&xkb::Keymap> for Layout {
             let mut normal_row = Vec::with_capacity(key_row.len());
             let mut shift_row = Vec::with_capacity(key_row.len());
             for &key in key_row.iter() {
+                let kind = match key {
+                    // Press these modifiers until a normal key is pressed
+                    "LALT" | "RALT" => KeyKind::Mod {
+                        name: xkb::MOD_NAME_ALT,
+                        sticky: true,
+                    },
+                    "LCTL" | "RCTL" => KeyKind::Mod {
+                        name: xkb::MOD_NAME_CTRL,
+                        sticky: true,
+                    },
+                    "LFSH" | "RTSH" => KeyKind::Mod {
+                        name: xkb::MOD_NAME_SHIFT,
+                        sticky: true,
+                    },
+                    "LWIN" | "RWIN" => KeyKind::Mod {
+                        name: xkb::MOD_NAME_LOGO,
+                        sticky: true,
+                    },
+                    // Caps-lock already toggles itself
+                    "CAPS" => KeyKind::Mod {
+                        name: xkb::MOD_NAME_CAPS,
+                        sticky: false,
+                    },
+                    // Normal keys
+                    _ => KeyKind::Normal,
+                };
+
                 let mut normal_key = Key {
                     name: key.to_string(),
+                    kind,
                     width: 1.0,
-                    action: Action::None,
+                    keycode: None,
                 };
                 let mut shift_key = Key {
                     name: key.to_string(),
+                    kind,
                     width: 1.0,
-                    action: Action::None,
+                    keycode: None,
                 };
 
                 match keymap.key_by_name(key) {
                     Some(kc) => {
-                        normal_key.action = Action::Keycode(kc);
-                        shift_key.action = Action::Keycode(kc);
+                        normal_key.keycode = Some(KeyCode(kc));
+                        shift_key.keycode = Some(KeyCode(kc));
 
                         let normal_syms = keymap.key_get_syms_by_level(kc, 0, 0);
                         if let Some(normal_sym) = normal_syms.get(0) {

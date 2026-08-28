@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use xkbcommon::xkb;
-
 use cosmic::{
     Application, Element,
     app::{Core, Settings, Task},
@@ -17,8 +15,11 @@ use cosmic::{
         },
         window::Id as WindowId,
     },
-    style, widget,
+    theme, widget,
 };
+use reis::ei::keyboard::KeyState;
+use std::collections::HashSet;
+use xkbcommon::xkb;
 
 use config::{CONFIG_VERSION, Config};
 pub mod config;
@@ -74,10 +75,10 @@ pub struct Flags {
 #[derive(Clone, Debug)]
 pub enum Message {
     Key {
-        action: layout::Action,
+        kind: layout::KeyKind,
+        keycode: layout::KeyCode,
         pressed: bool,
     },
-    Layer(usize),
     Ei(ei::Msg),
 }
 
@@ -89,7 +90,9 @@ pub struct App {
     key_size: usize,
     layout: Option<Layout>,
     layer: usize,
+    sticky: HashSet<layout::KeyCode>,
     surface_id: Option<WindowId>,
+    xkb_state: Option<xkb::State>,
     // TODO reis state
     ei_conn: Option<reis::event::Connection>,
     ei_keyboard: Option<(reis::ei::Device, reis::ei::Keyboard)>,
@@ -127,7 +130,9 @@ impl Application for App {
             key_size: 64,
             layer: 0,
             layout: None,
+            sticky: HashSet::new(),
             surface_id: None,
+            xkb_state: None,
             ei_conn: None,
             ei_keyboard: None,
         };
@@ -137,28 +142,83 @@ impl Application for App {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Key { action, pressed } => {
-                match action {
-                    layout::Action::None => {}
-                    layout::Action::Keycode(kc) => {
-                        // TODO send key to reis
-                        if let Some((device, keyboard)) = &self.ei_keyboard {
-                            let kc = u32::from(kc) - 8;
-                            let state = if pressed {
-                                reis::ei::keyboard::KeyState::Press
+            Message::Key {
+                kind,
+                keycode,
+                pressed,
+            } => {
+                let Some(xkb_state) = &mut self.xkb_state else {
+                    return Task::none();
+                };
+                // TODO send key to reis
+                if let Some((device, keyboard)) = &self.ei_keyboard {
+                    let (state, release_mods) = match kind {
+                        layout::KeyKind::Mod {
+                            name: mod_name,
+                            sticky,
+                        } if sticky => {
+                            // Sticky modifiers toggle, so ignore button release
+                            if !pressed {
+                                return Task::none();
+                            }
+
+                            (
+                                if self.sticky.remove(&keycode) {
+                                    // If the modifier is already stored, we need to release it
+                                    KeyState::Released
+                                } else {
+                                    // If the modifier is not stored, store it and press it
+                                    self.sticky.insert(keycode);
+                                    KeyState::Press
+                                },
+                                false,
+                            )
+                        }
+                        _ => (
+                            if pressed {
+                                KeyState::Press
                             } else {
-                                reis::ei::keyboard::KeyState::Released
-                            };
-                            keyboard.key(kc, state);
-                            // TODO device frame
-                            device.frame(0, 1); // TODO
-                            self.ei_conn.as_ref().unwrap().flush();
+                                KeyState::Released
+                            },
+                            true,
+                        ),
+                    };
+
+                    let mut key = |keycode: layout::KeyCode, state: KeyState| {
+                        xkb_state.update_key(
+                            keycode.xkb(),
+                            match state {
+                                KeyState::Press => xkb::KeyDirection::Down,
+                                KeyState::Released => xkb::KeyDirection::Up,
+                            },
+                        );
+                        keyboard.key(keycode.evdev(), state);
+                    };
+
+                    key(keycode, state);
+
+                    if release_mods {
+                        // Release non-permanent modifier keys
+                        for kc in self.sticky.drain() {
+                            key(kc, KeyState::Released);
                         }
                     }
+
+                    // TODO device frame
+                    device.frame(0, 1); // TODO
+                    self.ei_conn
+                        .as_ref()
+                        .unwrap()
+                        .flush()
+                        .expect("failed to flush EI connection");
                 }
-            }
-            Message::Layer(layer) => {
-                self.layer = layer;
+
+                //TODO: use xkb::State::key_get_level
+                let shift =
+                    xkb_state.mod_name_is_active(xkb::MOD_NAME_SHIFT, xkb::STATE_MODS_EFFECTIVE);
+                let caps =
+                    xkb_state.mod_name_is_active(xkb::MOD_NAME_CAPS, xkb::STATE_MODS_EFFECTIVE);
+                self.layer = if shift != caps { 1 } else { 0 };
             }
             Message::Ei(evt) => {
                 match evt {
@@ -181,7 +241,7 @@ impl Application for App {
                         evt.device.device().start_emulating(0, serial);
                         let keymap = evt.device.keymap().unwrap();
                         let ctx = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
-                        let layout = Layout::from(&unsafe {
+                        let xkb_keymap = unsafe {
                             xkb::Keymap::new_from_fd(
                                 &ctx,
                                 keymap.fd.try_clone().unwrap(),
@@ -191,7 +251,8 @@ impl Application for App {
                             )
                             .unwrap()
                             .unwrap()
-                        });
+                        };
+                        let layout = Layout::from(&xkb_keymap);
 
                         let mut height = 0;
                         for layer in layout.layers.iter() {
@@ -201,6 +262,7 @@ impl Application for App {
 
                         self.layer = 0;
                         self.layout = Some(layout);
+                        self.xkb_state = Some(xkb::State::new(&xkb_keymap));
 
                         //TODO: destroy and recreate surface when layout changes?
                         if !self.surface_id.is_some() {
@@ -250,25 +312,68 @@ impl Application for App {
             for layout_row in layout_layer.rows.iter() {
                 let mut r = widget::row::with_capacity(layout_row.len());
                 for key in layout_row.iter() {
-                    r = r.push(
-                        widget::container(
-                            widget::button::custom(
-                                widget::container(widget::text(&key.name)).center(Length::Fill),
-                            )
-                            //TODO: use custom style?
-                            .class(style::Button::MenuItem)
+                    let mut selected = false;
+                    if let Some(kc) = key.keycode {
+                        if let layout::KeyKind::Mod { name, sticky } = key.kind {
+                            if sticky {
+                                if self.sticky.contains(&kc) {
+                                    selected = true;
+                                }
+                            } else {
+                                if let Some(xkb_state) = &self.xkb_state {
+                                    if xkb_state.mod_name_is_active(name, xkb::STATE_MODS_EFFECTIVE)
+                                    {
+                                        selected = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    //TODO: adjust to match design
+                    let style = {
+                        use widget::button::Catalog;
+                        theme::Button::Custom {
+                            active: Box::new(move |focused, theme| {
+                                if selected {
+                                    theme.pressed(focused, selected, &theme::Button::MenuItem)
+                                } else {
+                                    theme.active(focused, selected, &theme::Button::MenuItem)
+                                }
+                            }),
+                            disabled: Box::new(move |theme| {
+                                theme.disabled(&theme::Button::MenuItem)
+                            }),
+                            hovered: Box::new(move |focused, theme| {
+                                theme.hovered(focused, selected, &theme::Button::MenuItem)
+                            }),
+                            pressed: Box::new(move |focused, theme| {
+                                theme.pressed(focused, selected, &theme::Button::MenuItem)
+                            }),
+                        }
+                    };
+                    let mut button = widget::button::custom(
+                        widget::container(widget::text(&key.name)).center(Length::Fill),
+                    )
+                    .class(style)
+                    .selected(selected);
+                    if let Some(keycode) = key.keycode {
+                        button = button
                             .on_press_down(Message::Key {
-                                action: key.action,
+                                kind: key.kind,
+                                keycode,
                                 pressed: true,
                             })
                             .on_press(Message::Key {
-                                action: key.action,
+                                kind: key.kind,
+                                keycode,
                                 pressed: false,
-                            }),
-                        )
-                        .padding(self.key_padding as u16)
-                        .height(Length::Fixed(self.key_size as f32))
-                        .width(Length::Fixed(self.key_size as f32 * key.width)),
+                            });
+                    }
+                    r = r.push(
+                        widget::container(button)
+                            .padding(self.key_padding as u16)
+                            .height(Length::Fixed(self.key_size as f32))
+                            .width(Length::Fixed(self.key_size as f32 * key.width)),
                     );
                 }
                 grid = grid.push(r);
@@ -278,7 +383,7 @@ impl Application for App {
             widget::text(format!("missing layout")).into()
         };
         widget::container(element)
-            .class(style::Container::Background)
+            .class(theme::Container::Background)
             .center(Length::Fill)
             .into()
     }
