@@ -472,6 +472,17 @@ impl Application for App {
                             }
                         }
                     }
+                    // Manually press space on north button
+                    EventType::ButtonPressed(Button::North, _)
+                    | EventType::ButtonReleased(Button::North, _) => {
+                        let pressed = matches!(event.event, EventType::ButtonPressed(..));
+                        return self.update(Message::Key {
+                            kind: layout::KeyKind::Normal,
+                            // KEY_SPACE plus 8
+                            keycode: layout::KeyCode(xkb::Keycode::new(57 + 8)),
+                            pressed,
+                        });
+                    }
                     // Manually press backspace on west button
                     EventType::ButtonPressed(Button::West, _)
                     | EventType::ButtonReleased(Button::West, _) => {
@@ -482,6 +493,10 @@ impl Application for App {
                             keycode: layout::KeyCode(xkb::Keycode::new(14 + 8)),
                             pressed,
                         });
+                    }
+                    // Close on east button
+                    EventType::ButtonPressed(Button::East, _) => {
+                        return self.update(Message::Quit);
                     }
                     _ => {}
                 }
