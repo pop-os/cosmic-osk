@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use cosmic::widget;
 use xkbcommon::xkb;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct KeyCode(xkb::Keycode);
+pub struct KeyCode(pub xkb::Keycode);
 
 impl KeyCode {
     pub fn xkb(&self) -> xkb::Keycode {
@@ -30,6 +31,7 @@ pub enum KeyKind {
 
 #[derive(Clone, Debug)]
 pub struct Key {
+    pub id: widget::Id,
     pub name: String,
     pub kind: KeyKind,
     pub width: f32,
@@ -122,17 +124,13 @@ impl Layout {
                 };
 
                 let mut normal_key = Key {
+                    id: widget::Id::unique(),
                     name: key.to_string(),
                     kind,
                     width: 1.0,
                     keycode: None,
                 };
-                let mut shift_key = Key {
-                    name: key.to_string(),
-                    kind,
-                    width: 1.0,
-                    keycode: None,
-                };
+                let mut shift_key = normal_key.clone();
 
                 match keymap.key_by_name(key) {
                     Some(kc) => {
