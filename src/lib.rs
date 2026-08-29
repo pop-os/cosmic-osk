@@ -1,24 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#[cfg(feature = "gilrs")]
+use cosmic::iced::futures::{self, SinkExt};
 use cosmic::{
     Application, Element,
     app::{Core, Settings, Task},
     cosmic_config::{self, CosmicConfigEntry},
     cosmic_theme, executor,
     iced::{
-        Length, Limits, Subscription,
+        Length, Limits, Rectangle, Subscription,
         platform_specific::{
             runtime::wayland::layer_surface::{IcedMargin, IcedOutput, SctkLayerSurfaceSettings},
             shell::wayland::commands::layer_surface::{
                 Anchor, KeyboardInteractivity, Layer, destroy_layer_surface, get_layer_surface,
             },
         },
+        stream,
         window::Id as WindowId,
     },
     theme, widget,
 };
 use reis::ei::keyboard::KeyState;
-use std::{collections::HashSet, process};
+use std::{any::TypeId, collections::HashSet, process};
 use xkbcommon::xkb;
 
 use config::{CONFIG_VERSION, Config};
@@ -71,9 +74,18 @@ pub struct Flags {
     config: Config,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum FocusDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum Message {
+    Focus(widget::Id),
     Key {
         kind: layout::KeyKind,
         keycode: layout::KeyCode,
@@ -81,12 +93,15 @@ pub enum Message {
     },
     Quit,
     Ei(ei::Msg),
+    #[cfg(feature = "gilrs")]
+    Gilrs(gilrs::Event),
 }
 
 pub struct App {
     core: Core,
     config_handler: Option<cosmic_config::Config>,
     config: Config,
+    focus: Option<widget::Id>,
     key_padding: usize,
     key_size: usize,
     layouts: Option<Vec<Layout>>,
@@ -98,6 +113,121 @@ pub struct App {
     // TODO reis state
     ei_conn: Option<reis::event::Connection>,
     ei_keyboard: Option<(reis::ei::Device, reis::ei::Keyboard)>,
+}
+
+impl App {
+    pub fn focus_index(&self) -> (usize, usize) {
+        if let Some(layout_layer) = self
+            .layout
+            .as_ref()
+            .and_then(|layout| layout.layers.get(self.layer))
+        {
+            for (y, layout_row) in layout_layer.rows.iter().enumerate() {
+                for (x, key) in layout_row.iter().enumerate() {
+                    if Some(&key.id) == self.focus.as_ref() {
+                        return (x, y);
+                    }
+                }
+            }
+        }
+
+        (0, 0)
+    }
+
+    pub fn find_focus(&self) -> Option<((usize, usize), Rectangle, layout::Key)> {
+        if let Some(layout_layer) = self
+            .layout
+            .as_ref()
+            .and_then(|layout| layout.layers.get(self.layer))
+        {
+            for (row_i, row) in layout_layer.rows.iter().enumerate() {
+                let mut x = 0.0;
+                for (col_i, key) in row.iter().enumerate() {
+                    if Some(&key.id) == self.focus.as_ref() {
+                        return Some((
+                            (row_i, col_i),
+                            Rectangle {
+                                x,
+                                y: row_i as f32,
+                                width: key.width,
+                                height: 1.0,
+                            },
+                            key.clone(),
+                        ));
+                    }
+                    x += key.width;
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn move_focus(&mut self, dir: FocusDirection) -> Task<Message> {
+        let (mut index, rect) = match self.find_focus() {
+            Some((index, rect, _)) => (index, rect),
+            //TODO: default to middle of layout?
+            None => ((0, 0), Rectangle::default()),
+        };
+        if let Some(layout_layer) = self
+            .layout
+            .as_ref()
+            .and_then(|layout| layout.layers.get(self.layer))
+        {
+            if let Some(row) = layout_layer.rows.get(index.0) {
+                match dir {
+                    FocusDirection::Left => {
+                        if index.1 == 0 {
+                            index.1 = row.len();
+                        }
+                        index.1 = index.1.saturating_sub(1);
+                    }
+                    FocusDirection::Right => {
+                        index.1 = index.1.saturating_add(1);
+                        if index.1 >= row.len() {
+                            index.1 = 0;
+                        }
+                    }
+                    FocusDirection::Up | FocusDirection::Down => {
+                        let row_i = if matches!(dir, FocusDirection::Up) {
+                            index.0.saturating_sub(1)
+                        } else {
+                            index.0.saturating_add(1)
+                        };
+                        if let Some(next_row) = layout_layer.rows.get(row_i) {
+                            let mut max_col_i = None;
+                            let mut max_overlap = 0.0;
+                            let mut x = 0.0;
+                            for (col_i, key) in next_row.iter().enumerate() {
+                                let next_x = x + key.width;
+                                let max_left = x.max(rect.x);
+                                let min_right = next_x.min(rect.x + rect.width);
+                                let overlap = (min_right - max_left).max(0.0);
+                                if overlap > max_overlap {
+                                    max_col_i = Some(col_i);
+                                    max_overlap = overlap;
+                                }
+                                x = next_x;
+                            }
+                            if let Some(col_i) = max_col_i {
+                                if let Some(key) = next_row.get(col_i) {
+                                    self.focus = Some(key.id.clone());
+                                    return widget::button::focus(key.id.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let Some(key) = row.get(index.1) {
+                    self.focus = Some(key.id.clone());
+                    return widget::button::focus(key.id.clone());
+                }
+            }
+        }
+
+        Task::none()
+    }
 }
 
 /// Implement [`cosmic::Application`] to integrate with COSMIC.
@@ -128,6 +258,7 @@ impl Application for App {
             core,
             config_handler: flags.config_handler,
             config: flags.config,
+            focus: None,
             key_padding: 4,
             key_size: 64,
             layer: 0,
@@ -145,6 +276,10 @@ impl Application for App {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Focus(id) => {
+                self.focus = Some(id.clone());
+                return widget::button::focus(id);
+            }
             Message::Key {
                 kind,
                 keycode,
@@ -305,6 +440,52 @@ impl Application for App {
                     _ => {}
                 }
             }
+            #[cfg(feature = "gilrs")]
+            Message::Gilrs(event) => {
+                use gilrs::{Button, EventType};
+
+                match event.event {
+                    // Use dpad to focus button
+                    EventType::ButtonPressed(Button::DPadLeft, _) => {
+                        return self.move_focus(FocusDirection::Left);
+                    }
+                    EventType::ButtonPressed(Button::DPadRight, _) => {
+                        return self.move_focus(FocusDirection::Right);
+                    }
+                    EventType::ButtonPressed(Button::DPadUp, _) => {
+                        return self.move_focus(FocusDirection::Up);
+                    }
+                    EventType::ButtonPressed(Button::DPadDown, _) => {
+                        return self.move_focus(FocusDirection::Down);
+                    }
+                    // Press current focused button on south button
+                    EventType::ButtonPressed(Button::South, _)
+                    | EventType::ButtonReleased(Button::South, _) => {
+                        let pressed = matches!(event.event, EventType::ButtonPressed(..));
+                        if let Some((_, _, key)) = self.find_focus() {
+                            if let Some(keycode) = key.keycode {
+                                return self.update(Message::Key {
+                                    kind: key.kind,
+                                    keycode,
+                                    pressed,
+                                });
+                            }
+                        }
+                    }
+                    // Manually press backspace on west button
+                    EventType::ButtonPressed(Button::West, _)
+                    | EventType::ButtonReleased(Button::West, _) => {
+                        let pressed = matches!(event.event, EventType::ButtonPressed(..));
+                        return self.update(Message::Key {
+                            kind: layout::KeyKind::Normal,
+                            // KEY_BACKSPACE plus 8
+                            keycode: layout::KeyCode(xkb::Keycode::new(14 + 8)),
+                            pressed,
+                        });
+                    }
+                    _ => {}
+                }
+            }
         }
 
         Task::none()
@@ -355,12 +536,16 @@ impl Application for App {
                             }
                         }
                     }
+
                     //TODO: adjust to match design
                     let style = {
                         use widget::button::Catalog;
-                        let adjust = move |theme: &cosmic::Theme,
-                                           mut style: widget::button::Style|
-                              -> widget::button::Style {
+
+                        fn adjust(
+                            theme: &cosmic::Theme,
+                            selected: bool,
+                            mut style: widget::button::Style,
+                        ) -> widget::button::Style {
                             let cosmic = theme.cosmic();
                             if selected {
                                 style.overlay = Some(cosmic::iced::Background::Color(
@@ -371,31 +556,36 @@ impl Application for App {
                             }
                             style.border_radius = cosmic.radius_s().into();
                             style
-                        };
+                        }
+
                         theme::Button::Custom {
                             active: Box::new(move |focused, theme| {
                                 adjust(
                                     theme,
+                                    selected,
                                     theme.active(focused, selected, &theme::Button::MenuItem),
                                 )
                             }),
                             disabled: Box::new(move |theme| {
-                                adjust(theme, theme.disabled(&theme::Button::MenuItem))
+                                adjust(theme, selected, theme.disabled(&theme::Button::MenuItem))
                             }),
                             hovered: Box::new(move |focused, theme| {
                                 adjust(
                                     theme,
+                                    selected,
                                     theme.hovered(focused, selected, &theme::Button::MenuItem),
                                 )
                             }),
                             pressed: Box::new(move |focused, theme| {
                                 adjust(
                                     theme,
+                                    selected,
                                     theme.pressed(focused, selected, &theme::Button::MenuItem),
                                 )
                             }),
                         }
                     };
+
                     let mut button = widget::button::custom(
                         widget::container(if selected {
                             widget::text::heading(&key.name)
@@ -405,6 +595,7 @@ impl Application for App {
                         .center(Length::Fill),
                     )
                     .class(style)
+                    .id(key.id.clone())
                     .selected(selected)
                     .width(Length::Fill)
                     .height(Length::Fill);
@@ -443,6 +634,33 @@ impl Application for App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        ei::subscription().map(Message::Ei)
+        #[cfg(feature = "gilrs")]
+        struct GilrsSubscription;
+
+        Subscription::batch([
+            ei::subscription().map(Message::Ei),
+            #[cfg(feature = "gilrs")]
+            Subscription::run_with(TypeId::of::<GilrsSubscription>(), |_| {
+                stream::channel(
+                    128,
+                    |mut output: futures::channel::mpsc::Sender<Message>| async move {
+                        tokio::task::spawn_blocking(move || {
+                            let mut gilrs = gilrs::Gilrs::new().unwrap();
+                            loop {
+                                // Examine new events
+                                while let Some(event) = gilrs.next_event_blocking(None) {
+                                    futures::executor::block_on(async {
+                                        output.send(Message::Gilrs(event)).await
+                                    })
+                                    .unwrap();
+                                }
+                            }
+                        })
+                        .await
+                        .unwrap();
+                    },
+                )
+            }),
+        ])
     }
 }
