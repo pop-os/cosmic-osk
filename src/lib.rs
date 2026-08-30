@@ -107,6 +107,7 @@ pub struct App {
     layouts: Option<Vec<Layout>>,
     group: u32,
     layer: usize,
+    pressed: HashSet<layout::KeyCode>,
     sticky: HashSet<layout::KeyCode>,
     surface_id: Option<WindowId>,
     xkb_state: Option<xkb::State>,
@@ -264,6 +265,7 @@ impl Application for App {
             layer: 0,
             layouts: None,
             group: 0,
+            pressed: HashSet::new(),
             sticky: HashSet::new(),
             surface_id: None,
             xkb_state: None,
@@ -283,62 +285,60 @@ impl Application for App {
             Message::Key {
                 kind,
                 keycode,
-                pressed,
+                mut pressed,
             } => {
                 let Some(xkb_state) = &mut self.xkb_state else {
                     return Task::none();
                 };
                 // TODO send key to reis
                 if let Some((device, keyboard)) = &self.ei_keyboard {
-                    let (state, release_mods) = match kind {
-                        layout::KeyKind::Mod {
-                            name: mod_name,
-                            sticky,
-                        } if sticky => {
+                    let release_mods = match kind {
+                        layout::KeyKind::Mod { sticky, .. } if sticky => {
                             // Sticky modifiers toggle, so ignore button release
                             if !pressed {
                                 return Task::none();
                             }
 
-                            (
-                                if self.sticky.remove(&keycode) {
-                                    // If the modifier is already stored, we need to release it
-                                    KeyState::Released
-                                } else {
-                                    // If the modifier is not stored, store it and press it
-                                    self.sticky.insert(keycode);
-                                    KeyState::Press
-                                },
-                                false,
-                            )
+                            // If the modifier is already stored, we need to release it
+                            pressed = !self.sticky.remove(&keycode);
+                            if pressed {
+                                self.sticky.insert(keycode);
+                            }
+                            false
                         }
-                        _ => (
+                        _ => true,
+                    };
+
+                    let mut key = |keycode: layout::KeyCode, pressed: bool| {
+                        if pressed {
+                            self.pressed.insert(keycode);
+                        } else {
+                            self.pressed.remove(&keycode);
+                        }
+                        xkb_state.update_key(
+                            keycode.xkb(),
+                            if pressed {
+                                xkb::KeyDirection::Down
+                            } else {
+                                xkb::KeyDirection::Up
+                            },
+                        );
+                        keyboard.key(
+                            keycode.evdev(),
                             if pressed {
                                 KeyState::Press
                             } else {
                                 KeyState::Released
                             },
-                            true,
-                        ),
-                    };
-
-                    let mut key = |keycode: layout::KeyCode, state: KeyState| {
-                        xkb_state.update_key(
-                            keycode.xkb(),
-                            match state {
-                                KeyState::Press => xkb::KeyDirection::Down,
-                                KeyState::Released => xkb::KeyDirection::Up,
-                            },
                         );
-                        keyboard.key(keycode.evdev(), state);
                     };
 
-                    key(keycode, state);
+                    key(keycode, pressed);
 
                     if release_mods {
                         // Release non-permanent modifier keys
                         for kc in self.sticky.drain() {
-                            key(kc, KeyState::Released);
+                            key(kc, false);
                         }
                     }
 
@@ -445,58 +445,75 @@ impl Application for App {
                 use gilrs::{Button, EventType};
 
                 match event.event {
-                    // Use dpad to focus button
-                    EventType::ButtonPressed(Button::DPadLeft, _) => {
-                        return self.move_focus(FocusDirection::Left);
-                    }
-                    EventType::ButtonPressed(Button::DPadRight, _) => {
-                        return self.move_focus(FocusDirection::Right);
-                    }
-                    EventType::ButtonPressed(Button::DPadUp, _) => {
-                        return self.move_focus(FocusDirection::Up);
-                    }
-                    EventType::ButtonPressed(Button::DPadDown, _) => {
-                        return self.move_focus(FocusDirection::Down);
-                    }
-                    // Press current focused button on south button
-                    EventType::ButtonPressed(Button::South, _)
-                    | EventType::ButtonReleased(Button::South, _) => {
+                    EventType::ButtonPressed(button, _) | EventType::ButtonReleased(button, _) => {
                         let pressed = matches!(event.event, EventType::ButtonPressed(..));
-                        if let Some((_, _, key)) = self.find_focus() {
-                            if let Some(keycode) = key.keycode {
-                                return self.update(Message::Key {
-                                    kind: key.kind,
-                                    keycode,
-                                    pressed,
-                                });
+
+                        let mut manual_key = |keycode: evdev::Key| -> Task<Message> {
+                            self.update(Message::Key {
+                                kind: layout::KeyKind::Normal,
+                                keycode: layout::KeyCode(xkb::Keycode::new(
+                                    u32::from(keycode.code()) + 8,
+                                )),
+                                pressed,
+                            })
+                        };
+
+                        match button {
+                            // Use dpad to focus button
+                            Button::DPadLeft => {
+                                if pressed {
+                                    return self.move_focus(FocusDirection::Left);
+                                }
                             }
+                            Button::DPadRight => {
+                                if pressed {
+                                    return self.move_focus(FocusDirection::Right);
+                                }
+                            }
+                            Button::DPadUp => {
+                                if pressed {
+                                    return self.move_focus(FocusDirection::Up);
+                                }
+                            }
+                            Button::DPadDown => {
+                                if pressed {
+                                    return self.move_focus(FocusDirection::Down);
+                                }
+                            }
+                            // Press current focused button on south button
+                            Button::South => {
+                                if let Some((_, _, key)) = self.find_focus() {
+                                    if let Some(keycode) = key.keycode {
+                                        return self.update(Message::Key {
+                                            kind: key.kind,
+                                            keycode,
+                                            pressed,
+                                        });
+                                    }
+                                }
+                            }
+                            // Manually press space on north button
+                            Button::North => {
+                                return manual_key(evdev::Key::KEY_SPACE);
+                            }
+                            // Manually press backspace on west button
+                            Button::West => {
+                                return manual_key(evdev::Key::KEY_BACKSPACE);
+                            }
+                            // Close on east button
+                            Button::East => {
+                                return self.update(Message::Quit);
+                            }
+                            // Manually press shift on left trigger
+                            Button::LeftTrigger2 => {
+                                return manual_key(evdev::Key::KEY_LEFTSHIFT);
+                            }
+                            // Manually press enter on right trigger
+                            Button::RightTrigger2 => {
+                                return manual_key(evdev::Key::KEY_ENTER);
+                            }
+                            _ => {}
                         }
-                    }
-                    // Manually press space on north button
-                    EventType::ButtonPressed(Button::North, _)
-                    | EventType::ButtonReleased(Button::North, _) => {
-                        let pressed = matches!(event.event, EventType::ButtonPressed(..));
-                        return self.update(Message::Key {
-                            kind: layout::KeyKind::Normal,
-                            // KEY_SPACE plus 8
-                            keycode: layout::KeyCode(xkb::Keycode::new(57 + 8)),
-                            pressed,
-                        });
-                    }
-                    // Manually press backspace on west button
-                    EventType::ButtonPressed(Button::West, _)
-                    | EventType::ButtonReleased(Button::West, _) => {
-                        let pressed = matches!(event.event, EventType::ButtonPressed(..));
-                        return self.update(Message::Key {
-                            kind: layout::KeyKind::Normal,
-                            // KEY_BACKSPACE plus 8
-                            keycode: layout::KeyCode(xkb::Keycode::new(14 + 8)),
-                            pressed,
-                        });
-                    }
-                    // Close on east button
-                    EventType::ButtonPressed(Button::East, _) => {
-                        return self.update(Message::Quit);
                     }
                     _ => {}
                 }
@@ -534,6 +551,7 @@ impl Application for App {
                 let mut r = widget::row::with_capacity(layout_row.len() + 2);
                 r = r.push(widget::space().width(Length::Fill));
                 for key in layout_row.iter() {
+                    let mut pressed = false;
                     let mut selected = false;
                     if let Some(kc) = key.keycode {
                         if let layout::KeyKind::Mod { name, sticky } = key.kind {
@@ -549,6 +567,9 @@ impl Application for App {
                                     }
                                 }
                             }
+                        }
+                        if self.pressed.contains(&kc) {
+                            pressed = true;
                         }
                     }
 
@@ -578,7 +599,11 @@ impl Application for App {
                                 adjust(
                                     theme,
                                     selected,
-                                    theme.active(focused, selected, &theme::Button::MenuItem),
+                                    if pressed {
+                                        theme.pressed(focused, selected, &theme::Button::MenuItem)
+                                    } else {
+                                        theme.active(focused, selected, &theme::Button::MenuItem)
+                                    },
                                 )
                             }),
                             disabled: Box::new(move |theme| {
@@ -588,7 +613,11 @@ impl Application for App {
                                 adjust(
                                     theme,
                                     selected,
-                                    theme.hovered(focused, selected, &theme::Button::MenuItem),
+                                    if pressed {
+                                        theme.pressed(focused, selected, &theme::Button::MenuItem)
+                                    } else {
+                                        theme.hovered(focused, selected, &theme::Button::MenuItem)
+                                    },
                                 )
                             }),
                             pressed: Box::new(move |focused, theme| {
