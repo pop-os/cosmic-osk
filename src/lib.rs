@@ -89,7 +89,8 @@ pub struct App {
     config: Config,
     key_padding: usize,
     key_size: usize,
-    layout: Option<Layout>,
+    layouts: Option<Vec<Layout>>,
+    group: u32,
     layer: usize,
     sticky: HashSet<layout::KeyCode>,
     surface_id: Option<WindowId>,
@@ -130,7 +131,8 @@ impl Application for App {
             key_padding: 4,
             key_size: 64,
             layer: 0,
-            layout: None,
+            layouts: None,
+            group: 0,
             sticky: HashSet::new(),
             surface_id: None,
             xkb_state: None,
@@ -226,7 +228,6 @@ impl Application for App {
             }
             Message::Ei(evt) => {
                 match evt {
-                    // TODO handle modifiers
                     ei::Msg::Connection(conn) => {
                         self.ei_conn = Some(conn);
                     }
@@ -256,16 +257,19 @@ impl Application for App {
                             .unwrap()
                             .unwrap()
                         };
-                        let layout = Layout::from(&xkb_keymap);
+                        let layouts =
+                            Layout::all(&xkb_keymap).unwrap_or_else(|| vec![Layout::default()]);
 
                         let mut height = 0;
-                        for layer in layout.layers.iter() {
-                            height = height
-                                .max((self.key_size + self.key_padding * 2) * layer.rows.len());
+                        for layout in &layouts {
+                            for layer in layout.layers.iter() {
+                                height = height
+                                    .max((self.key_size + self.key_padding * 2) * layer.rows.len());
+                            }
                         }
 
                         self.layer = 0;
-                        self.layout = Some(layout);
+                        self.layouts = Some(layouts);
                         self.xkb_state = Some(xkb::State::new(&xkb_keymap));
 
                         //TODO: destroy and recreate surface when layout changes?
@@ -294,6 +298,10 @@ impl Application for App {
                             });
                         }
                     }
+                    // TODO handle other modifiers
+                    ei::Msg::Event(reis::event::EiEvent::KeyboardModifiers(evt)) => {
+                        self.group = evt.group;
+                    }
                     _ => {}
                 }
             }
@@ -315,9 +323,9 @@ impl Application for App {
         } = theme::spacing();
 
         let element: Element<_> = if let Some(layout_layer) = self
-            .layout
+            .layouts
             .as_ref()
-            .and_then(|layout| layout.layers.get(self.layer))
+            .and_then(|layouts| layouts.get(self.group as usize)?.layers.get(self.layer))
         {
             let mut grid = widget::column::with_capacity(layout_layer.rows.len() + 1);
             grid = grid.push(widget::row::with_children(vec![
