@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-#[cfg(feature = "gilrs")]
-use cosmic::iced::futures::{self, SinkExt};
 use cosmic::{
     Application, Element,
     app::{Core, Settings, Task},
@@ -9,6 +7,7 @@ use cosmic::{
     cosmic_theme, executor,
     iced::{
         Length, Limits, Rectangle, Subscription,
+        futures::{self, SinkExt},
         platform_specific::{
             runtime::wayland::layer_surface::{IcedMargin, IcedOutput, SctkLayerSurfaceSettings},
             shell::wayland::commands::layer_surface::{
@@ -33,6 +32,8 @@ use layout::Layout;
 pub mod layout;
 
 pub mod localize;
+
+pub mod wayland;
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
@@ -86,12 +87,17 @@ pub enum FocusDirection {
 #[derive(Clone, Debug)]
 pub enum Message {
     Focus(widget::Id),
+    Hide,
     Key {
         kind: layout::KeyKind,
         keycode: layout::KeyCode,
         pressed: bool,
     },
     Quit,
+    SeatImActive {
+        seat_id: u32,
+        active: bool,
+    },
     Ei(ei::Msg),
     #[cfg(feature = "gilrs")]
     Gilrs(gilrs::Event),
@@ -117,6 +123,48 @@ pub struct App {
 }
 
 impl App {
+    pub fn hide(&mut self) -> Task<Message> {
+        if let Some(surface_id) = self.surface_id.take() {
+            destroy_layer_surface(surface_id)
+        } else {
+            Task::none()
+        }
+    }
+
+    pub fn show(&mut self) -> Task<Message> {
+        if self.surface_id.is_some() {
+            return Task::none();
+        }
+        let surface_id = WindowId::unique();
+        self.surface_id = Some(surface_id);
+
+        let mut height = 0;
+        if let Some(layout) = &self.layout {
+            for layer in layout.layers.iter() {
+                height = height.max((self.key_size + self.key_padding * 2) * layer.rows.len());
+            }
+        }
+
+        get_layer_surface(SctkLayerSurfaceSettings {
+            id: surface_id,
+            layer: Layer::Top,
+            keyboard_interactivity: KeyboardInteractivity::None,
+            input_zone: None,
+            anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
+            output: IcedOutput::Active,
+            namespace: "cosmic-osk".into(),
+            size: Some((None, Some(height as u32))),
+            margin: IcedMargin {
+                top: 0,
+                bottom: 0,
+                left: 0,
+                right: 0,
+            },
+            exclusive_zone: height as i32,
+            size_limits: Limits::NONE.min_width(320.0).min_height(height as f32),
+        })
+    }
+
     pub fn focus_index(&self) -> (usize, usize) {
         if let Some(layout_layer) = self
             .layout
@@ -282,6 +330,9 @@ impl Application for App {
                 self.focus = Some(id.clone());
                 return widget::button::focus(id);
             }
+            Message::Hide => {
+                return self.hide();
+            }
             Message::Key {
                 kind,
                 keycode,
@@ -361,6 +412,12 @@ impl Application for App {
             Message::Quit => {
                 process::exit(0);
             }
+            Message::SeatImActive { seat_id, active } => {
+                eprintln!("{} active: {}", seat_id, active);
+                if active {
+                    return self.show();
+                }
+            }
             Message::Ei(evt) => {
                 match evt {
                     ei::Msg::Connection(conn) => {
@@ -395,43 +452,12 @@ impl Application for App {
                         let layouts =
                             Layout::all(&xkb_keymap).unwrap_or_else(|| vec![Layout::default()]);
 
-                        let mut height = 0;
-                        for layout in &layouts {
-                            for layer in layout.layers.iter() {
-                                height = height
-                                    .max((self.key_size + self.key_padding * 2) * layer.rows.len());
-                            }
-                        }
-
                         self.layer = 0;
                         self.layouts = Some(layouts);
                         self.xkb_state = Some(xkb::State::new(&xkb_keymap));
 
                         //TODO: destroy and recreate surface when layout changes?
-                        if !self.surface_id.is_some() {
-                            let surface_id = WindowId::unique();
-                            self.surface_id = Some(surface_id);
-                            return get_layer_surface(SctkLayerSurfaceSettings {
-                                id: surface_id,
-                                layer: Layer::Top,
-                                keyboard_interactivity: KeyboardInteractivity::None,
-                                input_zone: None,
-                                anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
-                                output: IcedOutput::Active,
-                                namespace: "cosmic-osk".into(),
-                                size: Some((None, Some(height as u32))),
-                                margin: IcedMargin {
-                                    top: 0,
-                                    bottom: 0,
-                                    left: 0,
-                                    right: 0,
-                                },
-                                exclusive_zone: height as i32,
-                                size_limits: Limits::NONE
-                                    .min_width(320.0)
-                                    .min_height(height as f32),
-                            });
-                        }
+                        return self.show();
                     }
                     // TODO handle other modifiers
                     ei::Msg::Event(reis::event::EiEvent::KeyboardModifiers(evt)) => {
@@ -543,6 +569,9 @@ impl Application for App {
             let mut grid = widget::column::with_capacity(layout_layer.rows.len() + 1);
             grid = grid.push(widget::row::with_children(vec![
                 widget::space().width(Length::Fill).into(),
+                widget::button::icon(widget::icon::from_name("window-minimize-symbolic"))
+                    .on_press(Message::Hide)
+                    .into(),
                 widget::button::icon(widget::icon::from_name("window-close-symbolic"))
                     .on_press(Message::Quit)
                     .into(),
@@ -678,11 +707,22 @@ impl Application for App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
+        struct WaylandSubscription;
         #[cfg(feature = "gilrs")]
         struct GilrsSubscription;
 
         Subscription::batch([
             ei::subscription().map(Message::Ei),
+            Subscription::run_with(TypeId::of::<WaylandSubscription>(), |_| {
+                stream::channel(
+                    128,
+                    |output: futures::channel::mpsc::Sender<Message>| async move {
+                        tokio::task::spawn_blocking(move || wayland::wayland_task(output))
+                            .await
+                            .unwrap();
+                    },
+                )
+            }),
             #[cfg(feature = "gilrs")]
             Subscription::run_with(TypeId::of::<GilrsSubscription>(), |_| {
                 stream::channel(
