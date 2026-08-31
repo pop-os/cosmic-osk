@@ -5,7 +5,13 @@ fn main() {
 
     // Iterate over all connected gamepads
     for (_id, gamepad) in gilrs.gamepads() {
-        println!("{} is {:?}", gamepad.name(), gamepad.power_info());
+        println!(
+            "{} {:X?}:{:X?} is {:?}",
+            gamepad.name(),
+            gamepad.vendor_id(),
+            gamepad.product_id(),
+            gamepad.power_info()
+        );
     }
 
     loop {
