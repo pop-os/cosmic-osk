@@ -46,11 +46,21 @@ pub struct Layout {
     pub layers: Vec<Layer>,
 }
 
-impl From<&xkb::Keymap> for Layout {
-    fn from(keymap: &xkb::Keymap) -> Self {
+impl Layout {
+    pub fn all(keymap: &xkb::Keymap) -> Option<Vec<Self>> {
         if keymap.num_layouts() == 0 {
-            return Layout::default();
+            None
+        } else {
+            Some(
+                (0..keymap.num_layouts())
+                    .map(|layout| Self::new(keymap, layout))
+                    .collect(),
+            )
         }
+    }
+
+    fn new(keymap: &xkb::Keymap, layout: u32) -> Self {
+        assert!(keymap.num_layouts() > layout);
 
         let key_rows: &'static [&'static [&'static str]] = &[
             &[
@@ -129,7 +139,7 @@ impl From<&xkb::Keymap> for Layout {
                         normal_key.keycode = Some(KeyCode(kc));
                         shift_key.keycode = Some(KeyCode(kc));
 
-                        let normal_syms = keymap.key_get_syms_by_level(kc, 0, 0);
+                        let normal_syms = keymap.key_get_syms_by_level(kc, layout, 0);
                         if let Some(normal_sym) = normal_syms.get(0) {
                             normal_key.name = xkb::keysym_get_name(*normal_sym);
                             if let Some(normal_char) = normal_sym.key_char() {
@@ -142,7 +152,7 @@ impl From<&xkb::Keymap> for Layout {
                             shift_key.name = normal_key.name.clone();
                         }
 
-                        let shift_syms = keymap.key_get_syms_by_level(kc, 0, 1);
+                        let shift_syms = keymap.key_get_syms_by_level(kc, layout, 1);
                         if let Some(shift_sym) = shift_syms.get(0) {
                             shift_key.name = xkb::keysym_get_name(*shift_sym);
                             if let Some(shift_char) = shift_sym.key_char() {
