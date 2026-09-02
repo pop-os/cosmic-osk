@@ -140,9 +140,11 @@ impl App {
         self.surface_id = Some(surface_id);
 
         let mut height = 0;
-        if let Some(layout) = &self.layout {
-            for layer in layout.layers.iter() {
-                height = height.max((self.key_size + self.key_padding * 2) * layer.rows.len());
+        if let Some(layouts) = &self.layouts {
+            for layout in layouts.iter() {
+                for layer in layout.layers.iter() {
+                    height = height.max((self.key_size + self.key_padding * 2) * layer.rows.len());
+                }
             }
         }
 
@@ -166,12 +168,14 @@ impl App {
         })
     }
 
-    pub fn focus_index(&self) -> (usize, usize) {
-        if let Some(layout_layer) = self
-            .layout
+    pub fn layout_layer(&self) -> Option<&layout::Layer> {
+        self.layouts
             .as_ref()
-            .and_then(|layout| layout.layers.get(self.layer))
-        {
+            .and_then(|layouts| layouts.get(self.group as usize)?.layers.get(self.layer))
+    }
+
+    pub fn focus_index(&self) -> (usize, usize) {
+        if let Some(layout_layer) = self.layout_layer() {
             for (y, layout_row) in layout_layer.rows.iter().enumerate() {
                 for (x, key) in layout_row.iter().enumerate() {
                     if Some(&key.id) == self.focus.as_ref() {
@@ -185,11 +189,7 @@ impl App {
     }
 
     pub fn find_focus(&self) -> Option<((usize, usize), Rectangle, layout::Key)> {
-        if let Some(layout_layer) = self
-            .layout
-            .as_ref()
-            .and_then(|layout| layout.layers.get(self.layer))
-        {
+        if let Some(layout_layer) = self.layout_layer() {
             for (row_i, row) in layout_layer.rows.iter().enumerate() {
                 let mut x = 0.0;
                 for (col_i, key) in row.iter().enumerate() {
@@ -219,11 +219,9 @@ impl App {
             //TODO: default to middle of layout?
             None => ((0, 0), Rectangle::default()),
         };
-        if let Some(layout_layer) = self
-            .layout
-            .as_ref()
-            .and_then(|layout| layout.layers.get(self.layer))
-        {
+
+        let mut focus = None;
+        if let Some(layout_layer) = self.layout_layer() {
             if let Some(row) = layout_layer.rows.get(index.0) {
                 match dir {
                     FocusDirection::Left => {
@@ -231,11 +229,19 @@ impl App {
                             index.1 = row.len();
                         }
                         index.1 = index.1.saturating_sub(1);
+
+                        if let Some(key) = row.get(index.1) {
+                            focus = Some(key.id.clone());
+                        }
                     }
                     FocusDirection::Right => {
                         index.1 = index.1.saturating_add(1);
                         if index.1 >= row.len() {
                             index.1 = 0;
+                        }
+
+                        if let Some(key) = row.get(index.1) {
+                            focus = Some(key.id.clone());
                         }
                     }
                     FocusDirection::Up | FocusDirection::Down => {
@@ -261,22 +267,21 @@ impl App {
                             }
                             if let Some(col_i) = max_col_i {
                                 if let Some(key) = next_row.get(col_i) {
-                                    self.focus = Some(key.id.clone());
-                                    return widget::button::focus(key.id.clone());
+                                    focus = Some(key.id.clone());
                                 }
                             }
                         }
                     }
                 }
-
-                if let Some(key) = row.get(index.1) {
-                    self.focus = Some(key.id.clone());
-                    return widget::button::focus(key.id.clone());
-                }
             }
         }
 
-        Task::none()
+        if let Some(id) = focus {
+            self.focus = Some(id.clone());
+            widget::button::focus(id)
+        } else {
+            Task::none()
+        }
     }
 }
 
@@ -568,11 +573,7 @@ impl Application for App {
             ..
         } = theme::spacing();
 
-        let element: Element<_> = if let Some(layout_layer) = self
-            .layouts
-            .as_ref()
-            .and_then(|layouts| layouts.get(self.group as usize)?.layers.get(self.layer))
-        {
+        let element: Element<_> = if let Some(layout_layer) = self.layout_layer() {
             let mut grid = widget::column::with_capacity(layout_layer.rows.len() + 1);
             grid = grid.push(widget::row::with_children(vec![
                 widget::space().width(Length::Fill).into(),
