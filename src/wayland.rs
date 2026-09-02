@@ -129,7 +129,7 @@ impl Dispatch<WlSeat, u32> for State {
 impl Dispatch<ZwpInputMethodV2, u32> for State {
     fn event(
         state: &mut Self,
-        wl_seat: &ZwpInputMethodV2,
+        im: &ZwpInputMethodV2,
         event: zwp_input_method_v2::Event,
         &seat_id: &u32,
         _: &Connection,
