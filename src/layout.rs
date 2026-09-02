@@ -88,11 +88,25 @@ impl Layout {
             ],
         ];
 
+        // Create scratch xkb_state and update mask for Caps lock.
+        // This allows querying keysyms as if Caps lock is pressed.
+        let mut xkb_state_caps = xkb::State::new(keymap);
+        let caps_mask_filter = keymap
+            .mods()
+            .into_iter()
+            .filter(|v| *v == "Lock")
+            .collect::<Vec<&str>>();
+        let lock_modifier_name = caps_mask_filter.first();
+        let caps_mask = keymap.mod_get_index(lock_modifier_name.expect("Lock modifier should be present for keymap"));
+        xkb_state_caps.update_mask(0, 0, 1 << caps_mask, 0, 0, 0);
+
         let mut normal_layer = Layer::default();
         let mut shift_layer = Layer::default();
+        let mut caps_layer = Layer::default();
         for key_row in key_rows.iter() {
             let mut normal_row = Vec::with_capacity(key_row.len());
             let mut shift_row = Vec::with_capacity(key_row.len());
+            let mut caps_row = Vec::with_capacity(key_row.len());
             for &key in key_row.iter() {
                 let kind = match key {
                     // Press these modifiers until a normal key is pressed
@@ -133,11 +147,18 @@ impl Layout {
                     width: 1.0,
                     keycode: None,
                 };
+                let mut caps_key = Key {
+                    name: key.to_string(),
+                    kind,
+                    width: 1.0,
+                    keycode: None,
+                };
 
                 match keymap.key_by_name(key) {
                     Some(kc) => {
                         normal_key.keycode = Some(KeyCode(kc));
                         shift_key.keycode = Some(KeyCode(kc));
+                        caps_key.keycode = Some(KeyCode(kc));
 
                         let normal_syms = keymap.key_get_syms_by_level(kc, layout, 0);
                         if let Some(normal_sym) = normal_syms.get(0) {
@@ -150,6 +171,7 @@ impl Layout {
 
                             // Copy normal key name over by default
                             shift_key.name = normal_key.name.clone();
+                            caps_key.name = normal_key.name.clone();
                         }
 
                         let shift_syms = keymap.key_get_syms_by_level(kc, layout, 1);
@@ -161,6 +183,10 @@ impl Layout {
                                 }
                             }
                         }
+
+                        if let Some(caps_sym) = xkb_state_caps.key_get_one_sym(kc).key_char() {
+                            caps_key.name = caps_sym.to_string();
+                        }
                     }
                     None => {
                         eprintln!("cannot find keycode for {:?} in keymap", key);
@@ -171,6 +197,7 @@ impl Layout {
                     "BKSL" => {
                         normal_key.width = 1.5;
                         shift_key.width = 1.5;
+                        caps_key.width = 1.5;
                         None
                     }
                     "BKSP" => Some(("Bksp", 2.0)),
@@ -197,16 +224,20 @@ impl Layout {
                     normal_key.width = width;
                     shift_key.name = name.to_string();
                     shift_key.width = width;
+                    caps_key.name = name.to_string();
+                    caps_key.width = width;
                 }
 
                 normal_row.push(normal_key);
                 shift_row.push(shift_key);
+                caps_row.push(caps_key);
             }
             normal_layer.rows.push(normal_row);
             shift_layer.rows.push(shift_row);
+            caps_layer.rows.push(caps_row);
         }
         Layout {
-            layers: vec![normal_layer, shift_layer],
+            layers: vec![normal_layer, shift_layer, caps_layer],
         }
     }
 }

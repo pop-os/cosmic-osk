@@ -221,7 +221,11 @@ impl Application for App {
                     xkb_state.mod_name_is_active(xkb::MOD_NAME_SHIFT, xkb::STATE_MODS_EFFECTIVE);
                 let caps =
                     xkb_state.mod_name_is_active(xkb::MOD_NAME_CAPS, xkb::STATE_MODS_EFFECTIVE);
-                self.layer = if shift != caps { 1 } else { 0 };
+                self.layer = match (shift, caps) {
+                    (true, false) => 1,
+                    (false, true) => 2,
+                    _ => 0,
+                };
             }
             Message::Quit => {
                 process::exit(0);
