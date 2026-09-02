@@ -108,6 +108,7 @@ pub struct App {
     config_handler: Option<cosmic_config::Config>,
     config: Config,
     focus: Option<widget::Id>,
+    ignore_activate: bool,
     key_padding: usize,
     key_size: usize,
     layouts: Option<Vec<Layout>>,
@@ -308,6 +309,7 @@ impl Application for App {
             config_handler: flags.config_handler,
             config: flags.config,
             focus: None,
+            ignore_activate: false,
             key_padding: 4,
             key_size: 64,
             layer: 0,
@@ -331,6 +333,7 @@ impl Application for App {
                 return widget::button::focus(id);
             }
             Message::Hide => {
+                self.ignore_activate = true;
                 return self.hide();
             }
             Message::Key {
@@ -415,7 +418,11 @@ impl Application for App {
             Message::SeatImActive { seat_id, active } => {
                 eprintln!("{} active: {}", seat_id, active);
                 if active {
-                    return self.show();
+                    if !self.ignore_activate {
+                        return self.show();
+                    }
+                } else {
+                    self.ignore_activate = false;
                 }
             }
             Message::Ei(evt) => {
