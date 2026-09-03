@@ -157,7 +157,7 @@ pub struct App {
     layouts: Option<Vec<Layout>>,
     group: u32,
     layer: usize,
-    pressed: HashSet<layout::KeyCode>,
+    pressed: HashMap<layout::KeyCode, layout::KeyKind>,
     sticky: HashSet<layout::KeyCode>,
     size: Size,
     surface_center: bool,
@@ -353,6 +353,18 @@ impl App {
             Task::none()
         }
     }
+
+    pub fn release_all(&mut self) {
+        let pressed = self.pressed.clone();
+        for (keycode, kind) in pressed {
+            //TODO: ensure this task is none
+            let _ = self.update(Message::Key {
+                kind,
+                keycode,
+                pressed: false,
+            });
+        }
+    }
 }
 
 /// Implement [`cosmic::Application`] to integrate with COSMIC.
@@ -392,7 +404,7 @@ impl Application for App {
             layer: 0,
             layouts: None,
             group: 0,
-            pressed: HashSet::new(),
+            pressed: HashMap::new(),
             sticky: HashSet::new(),
             size: Size::default(),
             surface_center: false,
@@ -411,6 +423,7 @@ impl Application for App {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Dock(dock) => {
+                self.release_all();
                 if dock != self.docked {
                     let hide_task = self.hide();
                     self.docked = dock;
@@ -419,6 +432,7 @@ impl Application for App {
                 }
             }
             Message::DragStart(finger) => {
+                self.release_all();
                 if !self.docked && !self.drag.dragging {
                     self.drag = DragState::default();
                     self.drag.dragging = true;
@@ -427,6 +441,7 @@ impl Application for App {
                 }
             }
             Message::DragMove(finger, point) => {
+                self.release_all();
                 if !self.docked && self.drag.dragging && self.drag.finger == finger {
                     self.drag.mouse_pos = Some(point);
                     if let Some(vector) = self.drag.vector() {
@@ -468,6 +483,7 @@ impl Application for App {
                 }
             }
             Message::DragEnd(finger) => {
+                self.release_all();
                 if !self.docked && self.drag.dragging && self.drag.finger == finger {
                     self.surface_rect = self.drag.surface_rect;
                     self.drag = DragState::default();
@@ -481,6 +497,7 @@ impl Application for App {
                 return widget::button::focus(id);
             }
             Message::Hide => {
+                self.release_all();
                 self.ignore_activate = true;
                 return self.hide();
             }
@@ -513,7 +530,7 @@ impl Application for App {
 
                     let mut key = |keycode: layout::KeyCode, pressed: bool| {
                         if pressed {
-                            self.pressed.insert(keycode);
+                            self.pressed.insert(keycode, kind);
                         } else {
                             self.pressed.remove(&keycode);
                         }
@@ -832,7 +849,7 @@ impl Application for App {
                                 }
                             }
                         }
-                        if self.pressed.contains(&kc) {
+                        if self.pressed.contains_key(&kc) {
                             pressed = true;
                         }
                     }
