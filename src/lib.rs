@@ -114,7 +114,7 @@ pub struct GamepadMouse {
 impl GamepadMouse {
     pub fn frame(&mut self, instant: Instant) -> (f32, f32) {
         //TODO: find ideal speed
-        let speed = 1000.0;
+        let speed = 2000.0;
         let duration = instant
             .checked_duration_since(self.update.unwrap_or(instant))
             .unwrap_or_default()
