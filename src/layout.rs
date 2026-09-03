@@ -36,6 +36,7 @@ pub struct Key {
     pub kind: KeyKind,
     pub width: f32,
     pub keycode: Option<KeyCode>,
+    pub gamepad_mapping: Option<gilrs::Button>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -123,12 +124,22 @@ impl Layout {
                     _ => KeyKind::Normal,
                 };
 
+                let gamepad_mapping = match key {
+                    "BKSP" => Some(gilrs::Button::West),
+                    "CAPS" => Some(gilrs::Button::LeftThumb),
+                    "LFSH" => Some(gilrs::Button::LeftTrigger2),
+                    "RTRN" => Some(gilrs::Button::RightTrigger2),
+                    "SPCE" => Some(gilrs::Button::North),
+                    _ => None,
+                };
+
                 let mut normal_key = Key {
                     id: widget::Id::unique(),
                     name: key.to_string(),
                     kind,
                     width: 1.0,
                     keycode: None,
+                    gamepad_mapping,
                 };
                 let mut shift_key = normal_key.clone();
 
@@ -186,7 +197,7 @@ impl Layout {
                     "RTSH" => Some(("Shift", 1.75)),
                     "RTRN" => Some(("Enter", 2.25)),
                     "RWIN" => Some(("Super", 1.25)),
-                    "SPCE" => Some((" ", 5.5)),
+                    "SPCE" => Some(("Space", 5.5)),
                     "TAB" => Some(("Tab", 1.5)),
                     _ => None,
                 };

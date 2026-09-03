@@ -6,21 +6,29 @@ use cosmic::{
     cosmic_config::{self, CosmicConfigEntry},
     cosmic_theme, executor,
     iced::{
-        Length, Limits, Rectangle, Subscription,
+        Alignment, Length, Limits, Padding, Point, Rectangle, Size, Subscription, Vector, event,
         futures::{self, SinkExt},
+        mouse,
         platform_specific::{
             runtime::wayland::layer_surface::{IcedMargin, IcedOutput, SctkLayerSurfaceSettings},
-            shell::wayland::commands::layer_surface::{
-                Anchor, KeyboardInteractivity, Layer, destroy_layer_surface, get_layer_surface,
+            shell::{
+                commands::layer_surface::set_padding,
+                wayland::commands::layer_surface::{
+                    Anchor, KeyboardInteractivity, Layer, destroy_layer_surface, get_layer_surface,
+                    set_input_zone,
+                },
             },
         },
-        stream,
-        window::Id as WindowId,
+        stream, window,
     },
     theme, widget,
 };
 use reis::ei::keyboard::KeyState;
-use std::{any::TypeId, collections::HashSet, process};
+use std::{
+    any::TypeId,
+    collections::{HashMap, HashSet},
+    process,
+};
 use xkbcommon::xkb;
 
 use config::{CONFIG_VERSION, Config};
@@ -83,9 +91,21 @@ pub enum FocusDirection {
     Down,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GamepadAxisDirection {
+    #[default]
+    Center,
+    Negative,
+    Positive,
+}
+
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum Message {
+    Dock(bool),
+    DragStart,
+    DragMove(Point),
+    DragEnd,
     Focus(widget::Id),
     Hide,
     Key {
@@ -98,15 +118,33 @@ pub enum Message {
         seat_id: u32,
         active: bool,
     },
+    Size(Size),
     Ei(ei::Msg),
-    #[cfg(feature = "gilrs")]
     Gilrs(gilrs::Event),
+}
+
+#[derive(Default)]
+pub struct DragState {
+    dragging: bool,
+    start_pos: Option<Point>,
+    mouse_pos: Option<Point>,
+    surface_rect: Rectangle,
+}
+
+impl DragState {
+    fn vector(&self) -> Option<Vector> {
+        let start_pos = self.start_pos?;
+        let mouse_pos = self.mouse_pos?;
+        Some(mouse_pos - start_pos)
+    }
 }
 
 pub struct App {
     core: Core,
     config_handler: Option<cosmic_config::Config>,
     config: Config,
+    docked: bool,
+    drag: DragState,
     focus: Option<widget::Id>,
     ignore_activate: bool,
     key_padding: usize,
@@ -116,11 +154,16 @@ pub struct App {
     layer: usize,
     pressed: HashSet<layout::KeyCode>,
     sticky: HashSet<layout::KeyCode>,
-    surface_id: Option<WindowId>,
+    size: Size,
+    surface_center: bool,
+    surface_id: Option<window::Id>,
+    surface_rect: Rectangle,
     xkb_state: Option<xkb::State>,
     // TODO reis state
     ei_conn: Option<reis::event::Connection>,
     ei_keyboard: Option<(reis::ei::Device, reis::ei::Keyboard)>,
+    gamepad_axes: HashMap<gilrs::Axis, GamepadAxisDirection>,
+    gamepad_shown: bool,
 }
 
 impl App {
@@ -136,19 +179,30 @@ impl App {
         if self.surface_id.is_some() {
             return Task::none();
         }
-        let surface_id = WindowId::unique();
-        self.surface_id = Some(surface_id);
 
-        let mut height = 0;
+        self.surface_center = true;
+        self.surface_rect = Default::default();
         if let Some(layouts) = &self.layouts {
             for layout in layouts.iter() {
                 for layer in layout.layers.iter() {
-                    height = height.max((self.key_size + self.key_padding * 2) * layer.rows.len());
+                    let layer_height = (self.key_size + self.key_padding * 2) * layer.rows.len();
+                    self.surface_rect.height = self.surface_rect.height.max(layer_height as f32);
+                    for row in layer.rows.iter() {
+                        let mut row_width = 0.0;
+                        for key in row.iter() {
+                            row_width +=
+                                key.width * (self.key_size as f32) + self.key_padding as f32;
+                        }
+                        self.surface_rect.width = self.surface_rect.width.max(row_width);
+                    }
                 }
             }
         }
 
-        get_layer_surface(SctkLayerSurfaceSettings {
+        let surface_id = window::Id::unique();
+        self.surface_id = Some(surface_id);
+
+        let mut settings = SctkLayerSurfaceSettings {
             id: surface_id,
             layer: Layer::Top,
             keyboard_interactivity: KeyboardInteractivity::None,
@@ -156,16 +210,29 @@ impl App {
             anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
             output: IcedOutput::Active,
             namespace: "cosmic-osk".into(),
-            size: Some((None, Some(height as u32))),
+            size: Some((None, Some(self.surface_rect.height as u32))),
             margin: IcedMargin {
                 top: 0,
                 bottom: 0,
                 left: 0,
                 right: 0,
             },
-            exclusive_zone: height as i32,
-            size_limits: Limits::NONE.min_width(320.0).min_height(height as f32),
-        })
+            exclusive_zone: self.surface_rect.height as i32,
+            size_limits: Limits::NONE
+                .min_width(self.surface_rect.width)
+                .min_height(self.surface_rect.height),
+        };
+
+        // Adjustments for floating mode
+        if !self.docked {
+            settings.anchor |= Anchor::TOP;
+            //TODO: center by default
+            settings.input_zone = Some(vec![self.surface_rect]);
+            settings.size = None;
+            settings.exclusive_zone = 0;
+        }
+
+        get_layer_surface(settings)
     }
 
     pub fn layout_layer(&self) -> Option<&layout::Layer> {
@@ -229,19 +296,11 @@ impl App {
                             index.1 = row.len();
                         }
                         index.1 = index.1.saturating_sub(1);
-
-                        if let Some(key) = row.get(index.1) {
-                            focus = Some(key.id.clone());
-                        }
                     }
                     FocusDirection::Right => {
                         index.1 = index.1.saturating_add(1);
                         if index.1 >= row.len() {
                             index.1 = 0;
-                        }
-
-                        if let Some(key) = row.get(index.1) {
-                            focus = Some(key.id.clone());
                         }
                     }
                     FocusDirection::Up | FocusDirection::Down => {
@@ -271,6 +330,12 @@ impl App {
                                 }
                             }
                         }
+                    }
+                }
+
+                if focus.is_none() {
+                    if let Some(key) = row.get(index.1) {
+                        focus = Some(key.id.clone());
                     }
                 }
             }
@@ -313,6 +378,8 @@ impl Application for App {
             core,
             config_handler: flags.config_handler,
             config: flags.config,
+            docked: true,
+            drag: DragState::default(),
             focus: None,
             ignore_activate: false,
             key_padding: 4,
@@ -322,10 +389,15 @@ impl Application for App {
             group: 0,
             pressed: HashSet::new(),
             sticky: HashSet::new(),
+            size: Size::default(),
+            surface_center: false,
             surface_id: None,
+            surface_rect: Rectangle::default(),
             xkb_state: None,
             ei_conn: None,
             ei_keyboard: None,
+            gamepad_axes: HashMap::new(),
+            gamepad_shown: false,
         };
 
         (app, Task::none())
@@ -333,6 +405,53 @@ impl Application for App {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Dock(dock) => {
+                if dock != self.docked {
+                    let hide_task = self.hide();
+                    self.docked = dock;
+                    let show_task = self.show();
+                    return Task::batch([hide_task, show_task]);
+                }
+            }
+            Message::DragStart => {
+                if !self.docked && !self.drag.dragging {
+                    self.drag = DragState::default();
+                    self.drag.dragging = true;
+                    self.drag.surface_rect = self.surface_rect;
+                }
+            }
+            Message::DragMove(point) => {
+                if !self.docked && self.drag.dragging {
+                    self.drag.mouse_pos = Some(point);
+                    if let Some(vector) = self.drag.vector() {
+                        self.drag.surface_rect = self.surface_rect + vector;
+                        // Clamp to display
+                        self.drag.surface_rect.x = self
+                            .drag
+                            .surface_rect
+                            .x
+                            .min(self.size.width - self.drag.surface_rect.width)
+                            .max(0.0);
+                        self.drag.surface_rect.y = self
+                            .drag
+                            .surface_rect
+                            .y
+                            .min(self.size.height - self.drag.surface_rect.height)
+                            .max(0.0);
+                    } else {
+                        self.drag.start_pos = self.drag.mouse_pos;
+                    }
+                }
+            }
+            Message::DragEnd => {
+                if !self.docked && self.drag.dragging {
+                    self.surface_rect = self.drag.surface_rect;
+                    self.drag = DragState::default();
+                    if let Some(surface_id) = self.surface_id {
+                        return set_input_zone(surface_id, Some(vec![self.surface_rect]));
+                    }
+                }
+            }
             Message::Focus(id) => {
                 self.focus = Some(id.clone());
                 return widget::button::focus(id);
@@ -430,6 +549,18 @@ impl Application for App {
                     self.ignore_activate = false;
                 }
             }
+            Message::Size(size) => {
+                eprintln!("size: {:?}", size);
+                self.size = size;
+                if self.surface_center {
+                    self.surface_center = false;
+                    self.surface_rect.x = (size.width - self.surface_rect.width) / 2.0;
+                    self.surface_rect.y = (size.height - self.surface_rect.height) / 2.0;
+                    if let Some(surface_id) = self.surface_id {
+                        return set_input_zone(surface_id, Some(vec![self.surface_rect]));
+                    }
+                }
+            }
             Message::Ei(evt) => {
                 match evt {
                     ei::Msg::Connection(conn) => {
@@ -478,23 +609,55 @@ impl Application for App {
                     _ => {}
                 }
             }
-            #[cfg(feature = "gilrs")]
             Message::Gilrs(event) => {
-                use gilrs::{Button, EventType};
+                use gilrs::{Axis, Button, EventType};
+
+                // Show the gamepad mappings after any gamepad event
+                self.gamepad_shown = true;
 
                 match event.event {
+                    EventType::AxisChanged(axis, value, _) => {
+                        // Emulate a dpad press on axis movement
+                        const AXIS_OFF: f32 = 0.25;
+                        const AXIS_ON: f32 = 0.5;
+                        let last_dir = self.gamepad_axes.get(&axis).copied().unwrap_or_default();
+                        let dir = if value < -AXIS_ON {
+                            GamepadAxisDirection::Negative
+                        } else if value > AXIS_ON {
+                            GamepadAxisDirection::Positive
+                        } else if value > -AXIS_OFF && value < AXIS_OFF {
+                            GamepadAxisDirection::Center
+                        } else {
+                            last_dir
+                        };
+                        if last_dir != dir {
+                            eprintln!("{:?}: {:?}", axis, dir);
+                            self.gamepad_axes.insert(axis, dir);
+                            match axis {
+                                Axis::LeftStickX | Axis::RightStickX => match dir {
+                                    GamepadAxisDirection::Negative => {
+                                        return self.move_focus(FocusDirection::Left);
+                                    }
+                                    GamepadAxisDirection::Positive => {
+                                        return self.move_focus(FocusDirection::Right);
+                                    }
+                                    _ => {}
+                                },
+                                Axis::LeftStickY | Axis::RightStickY => match dir {
+                                    GamepadAxisDirection::Negative => {
+                                        return self.move_focus(FocusDirection::Down);
+                                    }
+                                    GamepadAxisDirection::Positive => {
+                                        return self.move_focus(FocusDirection::Up);
+                                    }
+                                    _ => {}
+                                },
+                                _ => {}
+                            }
+                        }
+                    }
                     EventType::ButtonPressed(button, _) | EventType::ButtonReleased(button, _) => {
                         let pressed = matches!(event.event, EventType::ButtonPressed(..));
-
-                        let mut manual_key = |keycode: evdev::Key| -> Task<Message> {
-                            self.update(Message::Key {
-                                kind: layout::KeyKind::Normal,
-                                keycode: layout::KeyCode(xkb::Keycode::new(
-                                    u32::from(keycode.code()) + 8,
-                                )),
-                                pressed,
-                            })
-                        };
 
                         match button {
                             // Use dpad to focus button
@@ -530,27 +693,28 @@ impl Application for App {
                                     }
                                 }
                             }
-                            // Manually press space on north button
-                            Button::North => {
-                                return manual_key(evdev::Key::KEY_SPACE);
-                            }
-                            // Manually press backspace on west button
-                            Button::West => {
-                                return manual_key(evdev::Key::KEY_BACKSPACE);
-                            }
                             // Close on east button
                             Button::East => {
                                 return self.update(Message::Quit);
                             }
-                            // Manually press shift on left trigger
-                            Button::LeftTrigger2 => {
-                                return manual_key(evdev::Key::KEY_LEFTSHIFT);
+                            // Search for layout specific mappings
+                            _ => {
+                                if let Some(layout_layer) = self.layout_layer() {
+                                    for row in layout_layer.rows.iter() {
+                                        for key in row.iter() {
+                                            if key.gamepad_mapping == Some(button) {
+                                                if let Some(keycode) = key.keycode {
+                                                    return self.update(Message::Key {
+                                                        kind: key.kind,
+                                                        keycode,
+                                                        pressed,
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                            // Manually press enter on right trigger
-                            Button::RightTrigger2 => {
-                                return manual_key(evdev::Key::KEY_ENTER);
-                            }
-                            _ => {}
                         }
                     }
                     _ => {}
@@ -565,7 +729,7 @@ impl Application for App {
         unimplemented!()
     }
 
-    fn view_window(&self, id: WindowId) -> Element<Message> {
+    fn view_window(&self, id: window::Id) -> Element<Message> {
         let cosmic_theme::Spacing {
             space_s,
             space_xs,
@@ -577,6 +741,21 @@ impl Application for App {
             let mut grid = widget::column::with_capacity(layout_layer.rows.len() + 1);
             grid = grid.push(widget::row::with_children(vec![
                 widget::space().width(Length::Fill).into(),
+                if self.docked {
+                    widget::button::icon(
+                        widget::icon::from_svg_bytes(include_bytes!("../res/keyboard-undock.svg"))
+                            .symbolic(true),
+                    )
+                    .on_press(Message::Dock(false))
+                    .into()
+                } else {
+                    widget::button::icon(
+                        widget::icon::from_svg_bytes(include_bytes!("../res/keyboard-dock.svg"))
+                            .symbolic(true),
+                    )
+                    .on_press(Message::Dock(true))
+                    .into()
+                },
                 widget::button::icon(widget::icon::from_name("window-minimize-symbolic"))
                     .on_press(Message::Hide)
                     .into(),
@@ -667,19 +846,60 @@ impl Application for App {
                         }
                     };
 
-                    let mut button = widget::button::custom(
-                        widget::container(if selected {
+                    let mut button_row = widget::row::with_capacity(3)
+                        .align_y(Alignment::Center)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .push(widget::space().width(Length::Fill));
+
+                    if self.gamepad_shown
+                        && let Some(button) = &key.gamepad_mapping
+                    {
+                        let svg_opt = match button {
+                            gilrs::Button::North => {
+                                Some(include_str!("../res/gamepad-north-symbolic.svg"))
+                            }
+                            gilrs::Button::West => {
+                                Some(include_str!("../res/gamepad-west-symbolic.svg"))
+                            }
+                            gilrs::Button::LeftTrigger2 => {
+                                Some(include_str!("../res/gamepad-left-trigger-symbolic.svg"))
+                            }
+                            gilrs::Button::RightTrigger2 => {
+                                Some(include_str!("../res/gamepad-right-trigger-symbolic.svg"))
+                            }
+                            gilrs::Button::LeftThumb => {
+                                Some(include_str!("../res/gamepad-left-stick-symbolic.svg"))
+                            }
+                            _ => None,
+                        };
+                        if let Some(svg) = svg_opt {
+                            button_row = button_row
+                                .push(
+                                    widget::icon(
+                                        widget::icon::from_svg_bytes(svg.as_bytes()).symbolic(true),
+                                    )
+                                    .size(16),
+                                )
+                                .push(widget::space().width(space_xxs));
+                        }
+                    }
+
+                    button_row = button_row
+                        .push(if selected {
                             widget::text::heading(&key.name)
                         } else {
                             widget::text::body(&key.name)
                         })
-                        .center(Length::Fill),
-                    )
-                    .class(style)
-                    .id(key.id.clone())
-                    .selected(selected)
-                    .width(Length::Fill)
-                    .height(Length::Fill);
+                        .push(widget::space().width(Length::Fill));
+
+                    let mut button = widget::button::custom(button_row)
+                        .class(style)
+                        .id(key.id.clone())
+                        .selected(selected)
+                        .width(Length::Fill)
+                        .height(Length::Fill);
+
                     if let Some(keycode) = key.keycode {
                         button = button
                             .on_press_down(Message::Key {
@@ -693,6 +913,7 @@ impl Application for App {
                                 pressed: false,
                             });
                     }
+
                     r = r.push(
                         widget::container(button)
                             .padding(self.key_padding as u16)
@@ -707,20 +928,52 @@ impl Application for App {
         } else {
             widget::text(format!("missing layout")).into()
         };
-        widget::container(element)
-            .padding([space_xxs, space_s, space_xs, space_s])
-            .class(theme::Container::Background)
+        let container = widget::container(element)
             .center(Length::Fill)
+            .class(theme::Container::Background)
+            .padding([space_xxs, space_s, space_xs, space_s]);
+        if self.docked {
+            container.into()
+        } else {
+            let surface_rect = if self.drag.dragging {
+                self.drag.surface_rect
+            } else {
+                self.surface_rect
+            };
+            widget::container(
+                container
+                    .width(surface_rect.width)
+                    .height(surface_rect.height),
+            )
+            .class(theme::Container::Transparent)
+            .padding([surface_rect.y, 0.0, 0.0, surface_rect.x])
             .into()
+        }
     }
 
     fn subscription(&self) -> Subscription<Message> {
         struct WaylandSubscription;
-        #[cfg(feature = "gilrs")]
         struct GilrsSubscription;
 
         Subscription::batch([
-            ei::subscription().map(Message::Ei),
+            event::listen_with(|event, status, _surface_id| match (event, status) {
+                (
+                    event::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                    event::Status::Ignored,
+                ) => Some(Message::DragStart),
+                (
+                    event::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+                    event::Status::Ignored,
+                ) => Some(Message::DragEnd),
+                (
+                    event::Event::Mouse(mouse::Event::CursorMoved { position }),
+                    event::Status::Ignored,
+                ) => Some(Message::DragMove(position)),
+                (event::Event::Window(window::Event::Resized(size)), _) => {
+                    Some(Message::Size(size))
+                }
+                _ => None,
+            }),
             Subscription::run_with(TypeId::of::<WaylandSubscription>(), |_| {
                 stream::channel(
                     128,
@@ -731,7 +984,7 @@ impl Application for App {
                     },
                 )
             }),
-            #[cfg(feature = "gilrs")]
+            ei::subscription().map(Message::Ei),
             Subscription::run_with(TypeId::of::<GilrsSubscription>(), |_| {
                 stream::channel(
                     128,
