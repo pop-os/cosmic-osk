@@ -136,7 +136,7 @@ impl Layout {
 
                 let icon = match key {
                     "BKSP" => Some(include_str!("../res/edit-clear-symbolic.svg")),
-                    "CAPS" => Some(include_str!("../res/keycap-return.svg")),
+                    "RTRN" => Some(include_str!("../res/keycap-return.svg")),
                     "DOWN" => Some(include_str!("../res/pan-down-symbolic.svg")),
                     "LEFT" => Some(include_str!("../res/pan-start-symbolic.svg")),
                     "LFSH" | "RTSH" => Some(include_str!("../res/keycap-shift.svg")),
