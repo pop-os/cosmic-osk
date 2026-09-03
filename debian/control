@@ -5,6 +5,7 @@ Maintainer: Jeremy Soller <jeremy@system76.com>
 Build-Depends:
     debhelper-compat (=13),
     just (>= 1.13.0),
+    libudev-dev,
     libxkbcommon-dev,
     pkg-config,
     rust-all,
