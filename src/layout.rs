@@ -140,7 +140,7 @@ impl Layout {
                     "DOWN" => Some(include_str!("../res/pan-down-symbolic.svg")),
                     "LEFT" => Some(include_str!("../res/pan-start-symbolic.svg")),
                     "LFSH" | "RTSH" => Some(include_str!("../res/keycap-shift.svg")),
-                    "RIGHT" => Some(include_str!("../res/pan-end-symbolic.svg")),
+                    "RGHT" => Some(include_str!("../res/pan-end-symbolic.svg")),
                     "UP" => Some(include_str!("../res/pan-up-symbolic.svg")),
                     _ => None,
                 }
