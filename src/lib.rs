@@ -12,7 +12,7 @@ use cosmic::{
         platform_specific::{
             runtime::wayland::layer_surface::{IcedMargin, IcedOutput, SctkLayerSurfaceSettings},
             shell::{
-                commands::layer_surface::set_padding,
+                commands::{blur::blur, layer_surface::set_padding},
                 wayland::commands::layer_surface::{
                     Anchor, KeyboardInteractivity, Layer, destroy_layer_surface, get_layer_surface,
                     set_input_zone,
@@ -441,6 +441,26 @@ impl Application for App {
                     } else {
                         self.drag.start_pos = self.drag.mouse_pos;
                     }
+                    if let Some(surface_id) = self.surface_id {
+                        return Task::batch(vec![
+                            set_padding(
+                                surface_id,
+                                IcedMargin {
+                                    left: self.drag.surface_rect.x.max(0.) as i32,
+                                    top: self.drag.surface_rect.y.max(0.) as i32,
+                                    bottom: (self.size.height
+                                        - self.drag.surface_rect.y
+                                        - self.drag.surface_rect.height)
+                                        .max(0.) as i32,
+                                    right: (self.size.width
+                                        - self.drag.surface_rect.x
+                                        - self.drag.surface_rect.width)
+                                        .max(0.) as i32,
+                                },
+                            ),
+                            blur(surface_id, Some(vec![self.drag.surface_rect])).discard(),
+                        ]);
+                    }
                 }
             }
             Message::DragEnd => {
@@ -551,15 +571,35 @@ impl Application for App {
             }
             Message::Size(size) => {
                 eprintln!("size: {:?}", size);
+                let mut tasks = Vec::new();
                 self.size = size;
                 if self.surface_center {
                     self.surface_center = false;
                     self.surface_rect.x = (size.width - self.surface_rect.width) / 2.0;
                     self.surface_rect.y = (size.height - self.surface_rect.height) / 2.0;
                     if let Some(surface_id) = self.surface_id {
-                        return set_input_zone(surface_id, Some(vec![self.surface_rect]));
+                        tasks.push(set_input_zone(surface_id, Some(vec![self.surface_rect])));
                     }
                 }
+                if let Some(surface_id) = self.surface_id
+                    && !self.docked
+                {
+                    tasks.push(set_padding(
+                        surface_id,
+                        IcedMargin {
+                            left: self.surface_rect.x.max(0.) as i32,
+                            top: self.surface_rect.y.max(0.) as i32,
+                            bottom: (self.size.height
+                                - self.surface_rect.y
+                                - self.surface_rect.height)
+                                .max(0.) as i32,
+                            right: (self.size.width - self.surface_rect.x - self.surface_rect.width)
+                                .max(0.) as i32,
+                        },
+                    ));
+                    tasks.push(blur(surface_id, Some(vec![self.surface_rect])).discard());
+                }
+                return Task::batch(tasks);
             }
             Message::Ei(evt) => {
                 match evt {
