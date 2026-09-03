@@ -37,6 +37,7 @@ pub struct Key {
     pub width: f32,
     pub keycode: Option<KeyCode>,
     pub gamepad_mapping: Option<gilrs::Button>,
+    pub icon: Option<widget::icon::Handle>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -133,6 +134,18 @@ impl Layout {
                     _ => None,
                 };
 
+                let icon = match key {
+                    "BKSP" => Some(include_str!("../res/edit-clear-symbolic.svg")),
+                    "CAPS" => Some(include_str!("../res/keycap-return.svg")),
+                    "DOWN" => Some(include_str!("../res/pan-down-symbolic.svg")),
+                    "LEFT" => Some(include_str!("../res/pan-start-symbolic.svg")),
+                    "LFSH" | "RTSH" => Some(include_str!("../res/keycap-shift.svg")),
+                    "RIGHT" => Some(include_str!("../res/pan-end-symbolic.svg")),
+                    "UP" => Some(include_str!("../res/pan-up-symbolic.svg")),
+                    _ => None,
+                }
+                .map(|data| widget::icon::from_svg_bytes(data.as_bytes()).symbolic(true));
+
                 let mut normal_key = Key {
                     id: widget::Id::unique(),
                     name: key.to_string(),
@@ -140,6 +153,7 @@ impl Layout {
                     width: 1.0,
                     keycode: None,
                     gamepad_mapping,
+                    icon,
                 };
                 let mut shift_key = normal_key.clone();
 
