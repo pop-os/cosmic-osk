@@ -21,7 +21,9 @@ use cosmic::{
                 },
             },
         },
-        stream, window,
+        stream,
+        touch::{self, Finger},
+        window,
     },
     theme, widget,
 };
@@ -105,9 +107,9 @@ pub enum GamepadAxisDirection {
 #[derive(Clone, Debug)]
 pub enum Message {
     Dock(bool),
-    DragStart,
-    DragMove(Point),
-    DragEnd,
+    DragStart(Option<Finger>),
+    DragMove(Option<Finger>, Point),
+    DragEnd(Option<Finger>),
     Focus(widget::Id),
     Hide,
     Key {
@@ -128,6 +130,7 @@ pub enum Message {
 #[derive(Default)]
 pub struct DragState {
     dragging: bool,
+    finger: Option<Finger>,
     start_pos: Option<Point>,
     mouse_pos: Option<Point>,
     surface_rect: Rectangle,
@@ -415,15 +418,16 @@ impl Application for App {
                     return Task::batch([hide_task, show_task]);
                 }
             }
-            Message::DragStart => {
+            Message::DragStart(finger) => {
                 if !self.docked && !self.drag.dragging {
                     self.drag = DragState::default();
                     self.drag.dragging = true;
+                    self.drag.finger = finger;
                     self.drag.surface_rect = self.surface_rect;
                 }
             }
-            Message::DragMove(point) => {
-                if !self.docked && self.drag.dragging {
+            Message::DragMove(finger, point) => {
+                if !self.docked && self.drag.dragging && self.drag.finger == finger {
                     self.drag.mouse_pos = Some(point);
                     if let Some(vector) = self.drag.vector() {
                         self.drag.surface_rect = self.surface_rect + vector;
@@ -465,8 +469,8 @@ impl Application for App {
                     }
                 }
             }
-            Message::DragEnd => {
-                if !self.docked && self.drag.dragging {
+            Message::DragEnd(finger) => {
+                if !self.docked && self.drag.dragging && self.drag.finger == finger {
                     self.surface_rect = self.drag.surface_rect;
                     self.drag = DragState::default();
                     if let Some(surface_id) = self.surface_id {
@@ -1010,18 +1014,34 @@ impl Application for App {
 
         Subscription::batch([
             event::listen_with(|event, status, _surface_id| match (event, status) {
+                //TODO: use mouse position at start of drag
                 (
                     event::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
                     event::Status::Ignored,
-                ) => Some(Message::DragStart),
+                ) => Some(Message::DragStart(None)),
                 (
                     event::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
                     event::Status::Ignored,
-                ) => Some(Message::DragEnd),
+                ) => Some(Message::DragEnd(None)),
                 (
                     event::Event::Mouse(mouse::Event::CursorMoved { position }),
                     event::Status::Ignored,
-                ) => Some(Message::DragMove(position)),
+                ) => Some(Message::DragMove(None, position)),
+                //TODO: use touch position at start of drag
+                (
+                    event::Event::Touch(touch::Event::FingerPressed { id, .. }),
+                    event::Status::Ignored,
+                ) => Some(Message::DragStart(Some(id))),
+                (
+                    event::Event::Touch(touch::Event::FingerMoved { id, position }),
+                    event::Status::Ignored,
+                ) => Some(Message::DragMove(Some(id), position)),
+                (
+                    event::Event::Touch(
+                        touch::Event::FingerLifted { id, .. } | touch::Event::FingerLost { id, .. },
+                    ),
+                    event::Status::Ignored,
+                ) => Some(Message::DragEnd(Some(id))),
                 (event::Event::Window(window::Event::Resized(size)), _) => {
                     Some(Message::Size(size))
                 }
