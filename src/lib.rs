@@ -6,7 +6,9 @@ use cosmic::{
     cosmic_config::{self, CosmicConfigEntry},
     cosmic_theme, executor,
     iced::{
-        Alignment, Length, Limits, Padding, Point, Rectangle, Size, Subscription, Vector, event,
+        Alignment, Length, Limits, Padding, Point, Rectangle, Size, Subscription, Vector,
+        core::text::LineHeight,
+        event,
         futures::{self, SinkExt},
         mouse,
         platform_specific::{
@@ -919,19 +921,25 @@ impl Application for App {
                                     widget::icon(
                                         widget::icon::from_svg_bytes(svg.as_bytes()).symbolic(true),
                                     )
-                                    .size(16),
+                                    .size(24),
                                 )
                                 .push(widget::space().width(space_xxs));
                         }
                     }
 
-                    button_row = button_row
-                        .push(if selected {
-                            widget::text::heading(&key.name)
-                        } else {
-                            widget::text::body(&key.name)
-                        })
-                        .push(widget::space().width(Length::Fill));
+                    if let Some(icon) = &key.icon {
+                        button_row = button_row
+                            .push(widget::icon(icon.clone()).size(16))
+                            .push(widget::space().width(Length::Fill));
+                    } else {
+                        button_row = button_row
+                            .push(widget::Text::new(&key.name).size(16).font(if selected {
+                                cosmic::font::semibold()
+                            } else {
+                                cosmic::font::default()
+                            }))
+                            .push(widget::space().width(Length::Fill));
+                    }
 
                     let mut button = widget::button::custom(button_row)
                         .class(style)
