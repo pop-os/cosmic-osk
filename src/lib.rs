@@ -928,18 +928,23 @@ impl Application for App {
                     }
 
                     if let Some(icon) = &key.icon {
-                        button_row = button_row
-                            .push(widget::icon(icon.clone()).size(16))
-                            .push(widget::space().width(Length::Fill));
+                        button_row = button_row.push(widget::icon(icon.clone()).size(20));
                     } else {
-                        button_row = button_row
-                            .push(widget::Text::new(&key.name).size(16).font(if selected {
-                                cosmic::font::semibold()
-                            } else {
-                                cosmic::font::default()
-                            }))
-                            .push(widget::space().width(Length::Fill));
+                        button_row = button_row.push(
+                            widget::Text::new(&key.name)
+                                .size(if key.name.chars().count() <= 1 {
+                                    18
+                                } else {
+                                    16
+                                })
+                                .font(if selected {
+                                    cosmic::font::semibold()
+                                } else {
+                                    cosmic::font::default()
+                                }),
+                        );
                     }
+                    button_row = button_row.push(widget::space().width(Length::Fill));
 
                     let mut button = widget::button::custom(button_row)
                         .class(style)
