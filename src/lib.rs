@@ -32,6 +32,7 @@ use std::{
     any::TypeId,
     collections::{HashMap, HashSet},
     process,
+    time::Instant,
 };
 use xkbcommon::xkb;
 
@@ -103,6 +104,29 @@ pub enum GamepadAxisDirection {
     Positive,
 }
 
+#[derive(Default)]
+pub struct GamepadMouse {
+    dx: Option<f32>,
+    dy: Option<f32>,
+    update: Option<Instant>,
+}
+
+impl GamepadMouse {
+    pub fn frame(&mut self, instant: Instant) -> (f32, f32) {
+        //TODO: find ideal speed
+        let speed = 1000.0;
+        let duration = instant
+            .checked_duration_since(self.update.unwrap_or(instant))
+            .unwrap_or_default()
+            .as_secs_f32();
+        self.update = Some(instant);
+        (
+            self.dx.unwrap_or_default() * duration * speed,
+            -self.dy.unwrap_or_default() * duration * speed,
+        )
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum Message {
@@ -110,6 +134,7 @@ pub enum Message {
     DragStart(Option<Finger>),
     DragMove(Option<Finger>, Point),
     DragEnd(Option<Finger>),
+    Frame(Instant),
     Focus(widget::Id),
     Hide,
     Key {
@@ -166,8 +191,11 @@ pub struct App {
     xkb_state: Option<xkb::State>,
     // TODO reis state
     ei_conn: Option<reis::event::Connection>,
+    ei_button: Option<(reis::ei::Device, reis::ei::Button)>,
     ei_keyboard: Option<(reis::ei::Device, reis::ei::Keyboard)>,
+    ei_pointer: Option<(reis::ei::Device, reis::ei::Pointer)>,
     gamepad_axes: HashMap<gilrs::Axis, GamepadAxisDirection>,
+    gamepad_mouse: GamepadMouse,
     gamepad_shown: bool,
 }
 
@@ -185,8 +213,8 @@ impl App {
             return Task::none();
         }
 
-        self.surface_center = true;
-        self.surface_rect = Default::default();
+        self.surface_rect.width = 0.0;
+        self.surface_rect.height = 0.0;
         if let Some(layouts) = &self.layouts {
             for layout in layouts.iter() {
                 for layer in layout.layers.iter() {
@@ -407,13 +435,16 @@ impl Application for App {
             pressed: HashMap::new(),
             sticky: HashSet::new(),
             size: Size::default(),
-            surface_center: false,
+            surface_center: true,
             surface_id: None,
             surface_rect: Rectangle::default(),
             xkb_state: None,
             ei_conn: None,
+            ei_button: None,
             ei_keyboard: None,
+            ei_pointer: None,
             gamepad_axes: HashMap::new(),
+            gamepad_mouse: GamepadMouse::default(),
             gamepad_shown: false,
         };
 
@@ -459,6 +490,8 @@ impl Application for App {
                             .y
                             .min(self.size.height - self.drag.surface_rect.height)
                             .max(0.0);
+                        // Do not center on display after drag
+                        self.surface_center = false;
                     } else {
                         self.drag.start_pos = self.drag.mouse_pos;
                     }
@@ -490,6 +523,20 @@ impl Application for App {
                     if let Some(surface_id) = self.surface_id {
                         return set_input_zone(surface_id, Some(vec![self.surface_rect]));
                     }
+                }
+            }
+            Message::Frame(instant) => {
+                //TODO: scale with instant from last event
+                if let Some((device, pointer)) = &self.ei_pointer {
+                    let (dx, dy) = self.gamepad_mouse.frame(instant);
+                    pointer.motion_relative(dx, dy);
+                    // TODO device frame
+                    device.frame(0, 1); // TODO
+                    self.ei_conn
+                        .as_ref()
+                        .unwrap()
+                        .flush()
+                        .expect("failed to flush EI connection");
                 }
             }
             Message::Focus(id) => {
@@ -592,19 +639,16 @@ impl Application for App {
             }
             Message::Size(size) => {
                 eprintln!("size: {:?}", size);
-                let mut tasks = Vec::new();
-                self.size = size;
-                if self.surface_center {
-                    self.surface_center = false;
-                    self.surface_rect.x = (size.width - self.surface_rect.width) / 2.0;
-                    self.surface_rect.y = (size.height - self.surface_rect.height) / 2.0;
-                    if let Some(surface_id) = self.surface_id {
-                        tasks.push(set_input_zone(surface_id, Some(vec![self.surface_rect])));
-                    }
-                }
                 if let Some(surface_id) = self.surface_id
                     && !self.docked
                 {
+                    let mut tasks = Vec::with_capacity(2);
+                    self.size = size;
+                    if self.surface_center {
+                        self.surface_rect.x = (size.width - self.surface_rect.width) / 2.0;
+                        self.surface_rect.y = (size.height - self.surface_rect.height) / 2.0;
+                        tasks.push(set_input_zone(surface_id, Some(vec![self.surface_rect])));
+                    }
                     let t = cosmic::theme::active();
                     let theme = t.cosmic();
                     let rad_s = theme.radius_s();
@@ -623,8 +667,8 @@ impl Application for App {
                         )
                         .discard(),
                     );
+                    return Task::batch(tasks);
                 }
-                return Task::batch(tasks);
             }
             Message::Ei(evt) => {
                 match evt {
@@ -633,39 +677,78 @@ impl Application for App {
                     }
                     ei::Msg::Event(reis::event::EiEvent::SeatAdded(evt)) => {
                         use reis::event::DeviceCapability;
-                        evt.seat
-                            .bind_capabilities(DeviceCapability::Keyboard.into());
+
+                        eprintln!("{:?}", evt);
+
+                        evt.seat.bind_capabilities(
+                            (DeviceCapability::Keyboard
+                                | DeviceCapability::Pointer
+                                | DeviceCapability::Button)
+                                .into(),
+                        );
                         let _ = self.ei_conn.as_ref().unwrap().flush();
                     }
                     ei::Msg::Event(reis::event::EiEvent::DeviceAdded(evt)) => {
-                        self.ei_keyboard = Some((
-                            evt.device.device().clone(),
-                            evt.device.interface::<reis::ei::Keyboard>().unwrap(),
-                        ));
-                        let serial = self.ei_conn.as_ref().unwrap().serial();
-                        evt.device.device().start_emulating(0, serial);
-                        let keymap = evt.device.keymap().unwrap();
-                        let ctx = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
-                        let xkb_keymap = unsafe {
-                            xkb::Keymap::new_from_fd(
-                                &ctx,
-                                keymap.fd.try_clone().unwrap(),
-                                keymap.size as usize,
-                                xkb::KEYMAP_FORMAT_TEXT_V1,
-                                xkb::KEYMAP_COMPILE_NO_FLAGS,
-                            )
-                            .unwrap()
-                            .unwrap()
-                        };
-                        let layouts =
-                            Layout::all(&xkb_keymap).unwrap_or_else(|| vec![Layout::default()]);
+                        use reis::event::DeviceCapability;
 
-                        self.layer = 0;
-                        self.layouts = Some(layouts);
-                        self.xkb_state = Some(xkb::State::new(&xkb_keymap));
+                        eprintln!("{:?}", evt);
+                        let mut start = false;
 
-                        //TODO: destroy and recreate surface when layout changes?
-                        return self.show();
+                        if evt.device.has_capability(DeviceCapability::Button) {
+                            eprintln!("  has button");
+                            self.ei_button = Some((
+                                evt.device.device().clone(),
+                                evt.device.interface::<reis::ei::Button>().unwrap(),
+                            ));
+                            start = true;
+                        }
+
+                        if evt.device.has_capability(DeviceCapability::Pointer) {
+                            eprintln!("  has pointer");
+                            self.ei_pointer = Some((
+                                evt.device.device().clone(),
+                                evt.device.interface::<reis::ei::Pointer>().unwrap(),
+                            ));
+                            start = true;
+                        }
+
+                        if evt.device.has_capability(DeviceCapability::Keyboard) {
+                            eprintln!("  has keyboard");
+                            self.ei_keyboard = Some((
+                                evt.device.device().clone(),
+                                evt.device.interface::<reis::ei::Keyboard>().unwrap(),
+                            ));
+                            let serial = self.ei_conn.as_ref().unwrap().serial();
+                            evt.device.device().start_emulating(0, serial);
+                            let keymap = evt.device.keymap().unwrap();
+                            let ctx = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+                            let xkb_keymap = unsafe {
+                                xkb::Keymap::new_from_fd(
+                                    &ctx,
+                                    keymap.fd.try_clone().unwrap(),
+                                    keymap.size as usize,
+                                    xkb::KEYMAP_FORMAT_TEXT_V1,
+                                    xkb::KEYMAP_COMPILE_NO_FLAGS,
+                                )
+                                .unwrap()
+                                .unwrap()
+                            };
+                            let layouts =
+                                Layout::all(&xkb_keymap).unwrap_or_else(|| vec![Layout::default()]);
+
+                            self.layer = 0;
+                            self.layouts = Some(layouts);
+                            self.xkb_state = Some(xkb::State::new(&xkb_keymap));
+
+                            //TODO: destroy and recreate surface when layout changes?
+                            return self.show();
+                        }
+
+                        // This starts emulating if a non-keyboard device is found. The keyboard type does it above
+                        if start {
+                            let serial = self.ei_conn.as_ref().unwrap().serial();
+                            evt.device.device().start_emulating(0, serial);
+                        }
                     }
                     // TODO handle other modifiers
                     ei::Msg::Event(reis::event::EiEvent::KeyboardModifiers(evt)) => {
@@ -675,6 +758,11 @@ impl Application for App {
                 }
             }
             Message::Gilrs(event) => {
+                // Only handle gamepad events if surface is visible
+                if self.surface_id.is_none() {
+                    return Task::none();
+                }
+
                 use gilrs::{Axis, Button, EventType};
 
                 // Show the gamepad mappings after any gamepad event
@@ -682,7 +770,7 @@ impl Application for App {
 
                 match event.event {
                     EventType::AxisChanged(axis, value, _) => {
-                        // Emulate a dpad press on axis movement
+                        // Emulate a dpad press on left axis movement
                         const AXIS_OFF: f32 = 0.25;
                         const AXIS_ON: f32 = 0.5;
                         let last_dir = self.gamepad_axes.get(&axis).copied().unwrap_or_default();
@@ -695,30 +783,53 @@ impl Application for App {
                         } else {
                             last_dir
                         };
-                        if last_dir != dir {
-                            eprintln!("{:?}: {:?}", axis, dir);
-                            self.gamepad_axes.insert(axis, dir);
-                            match axis {
-                                Axis::LeftStickX | Axis::RightStickX => match dir {
-                                    GamepadAxisDirection::Negative => {
-                                        return self.move_focus(FocusDirection::Left);
-                                    }
-                                    GamepadAxisDirection::Positive => {
-                                        return self.move_focus(FocusDirection::Right);
-                                    }
-                                    _ => {}
-                                },
-                                Axis::LeftStickY | Axis::RightStickY => match dir {
-                                    GamepadAxisDirection::Negative => {
-                                        return self.move_focus(FocusDirection::Down);
-                                    }
-                                    GamepadAxisDirection::Positive => {
-                                        return self.move_focus(FocusDirection::Up);
-                                    }
-                                    _ => {}
-                                },
+                        self.gamepad_axes.insert(axis, dir);
+
+                        // Emulate a mouse on right axis movement
+                        const MOUSE_DEADZONE: f32 = 0.15;
+
+                        match axis {
+                            Axis::LeftStickX if last_dir != dir => match dir {
+                                GamepadAxisDirection::Negative => {
+                                    return self.move_focus(FocusDirection::Left);
+                                }
+                                GamepadAxisDirection::Positive => {
+                                    return self.move_focus(FocusDirection::Right);
+                                }
                                 _ => {}
+                            },
+                            Axis::LeftStickY if last_dir != dir => match dir {
+                                GamepadAxisDirection::Negative => {
+                                    return self.move_focus(FocusDirection::Down);
+                                }
+                                GamepadAxisDirection::Positive => {
+                                    return self.move_focus(FocusDirection::Up);
+                                }
+                                _ => {}
+                            },
+                            Axis::RightStickX => {
+                                if value < -MOUSE_DEADZONE {
+                                    self.gamepad_mouse.dx = Some(value + MOUSE_DEADZONE);
+                                } else if value > MOUSE_DEADZONE {
+                                    self.gamepad_mouse.dx = Some(value - MOUSE_DEADZONE);
+                                } else {
+                                    self.gamepad_mouse.dx = None;
+                                }
                             }
+                            Axis::RightStickY => {
+                                if value < -MOUSE_DEADZONE {
+                                    self.gamepad_mouse.dy = Some(value + MOUSE_DEADZONE);
+                                } else if value > MOUSE_DEADZONE {
+                                    self.gamepad_mouse.dy = Some(value - MOUSE_DEADZONE);
+                                } else {
+                                    self.gamepad_mouse.dy = None;
+                                }
+                            }
+                            _ => {}
+                        }
+
+                        if self.gamepad_mouse.dx.is_none() && self.gamepad_mouse.dy.is_none() {
+                            self.gamepad_mouse.update = None;
                         }
                     }
                     EventType::ButtonPressed(button, _) | EventType::ButtonReleased(button, _) => {
@@ -761,6 +872,40 @@ impl Application for App {
                             // Close on east button
                             Button::East => {
                                 return self.update(Message::Quit);
+                            }
+                            // Left click on R1, right click on L1 (intentional)
+                            Button::LeftTrigger | Button::RightTrigger => {
+                                let index = if matches!(button, Button::LeftTrigger) {
+                                    // BTN_RIGHT
+                                    0x111
+                                } else {
+                                    // BTN_LEFT
+                                    0x110
+                                };
+                                if let Some((device, button)) = &self.ei_button {
+                                    button.button(
+                                        index,
+                                        if pressed {
+                                            reis::ei::button::ButtonState::Press
+                                        } else {
+                                            reis::ei::button::ButtonState::Released
+                                        },
+                                    );
+
+                                    // TODO device frame
+                                    device.frame(0, 1); // TODO
+                                    self.ei_conn
+                                        .as_ref()
+                                        .unwrap()
+                                        .flush()
+                                        .expect("failed to flush EI connection");
+                                }
+                            }
+                            // Toggle docking on R3
+                            Button::RightThumb => {
+                                if pressed {
+                                    return self.update(Message::Dock(!self.docked));
+                                }
                             }
                             // Search for layout specific mappings
                             _ => {
@@ -1061,9 +1206,12 @@ impl Application for App {
                     ),
                     event::Status::Ignored,
                 ) => Some(Message::DragEnd(Some(id))),
-                (event::Event::Window(window::Event::Resized(size)), _) => {
-                    Some(Message::Size(size))
-                }
+                (
+                    event::Event::Window(
+                        window::Event::Opened { size, .. } | window::Event::Resized(size),
+                    ),
+                    _,
+                ) => Some(Message::Size(size)),
                 _ => None,
             }),
             Subscription::run_with(TypeId::of::<WaylandSubscription>(), |_| {
@@ -1098,6 +1246,11 @@ impl Application for App {
                     },
                 )
             }),
+            if self.gamepad_mouse.dx.is_some() || self.gamepad_mouse.dy.is_some() {
+                window::frames().map(|(_surface_id, instant)| Message::Frame(instant))
+            } else {
+                Subscription::none()
+            },
         ])
     }
 }

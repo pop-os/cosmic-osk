@@ -12,6 +12,7 @@ use reis::ei;
 use std::os::{fd::OwnedFd, unix::net::UnixStream};
 
 const DEVICE_TYPE_KEYBOARD: u32 = 1;
+const DEVICE_TYPE_POINTER: u32 = 2;
 
 #[zbus::proxy(
     interface = "com.system76.CosmicComp.Ei",
@@ -67,7 +68,9 @@ async fn open_connection() -> ei::Context {
 
         // Connect to cosmic-comp using `com.system76.CosmicComp.Ei` directly
         if let Ok(proxy) = EiProxy::new(&conn).await
-            && let Ok(socket) = proxy.get_sender_socket(DEVICE_TYPE_KEYBOARD).await
+            && let Ok(socket) = proxy
+                .get_sender_socket(DEVICE_TYPE_KEYBOARD | DEVICE_TYPE_POINTER)
+                .await
         {
             let stream = UnixStream::from(OwnedFd::from(socket));
             ei::Context::new(stream).unwrap()
