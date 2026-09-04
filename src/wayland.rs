@@ -47,6 +47,7 @@ struct Seat {
     wl: WlSeat,
     im: Option<ZwpInputMethodV2>,
     im_active: bool,
+    im_active_sent: bool,
 }
 
 struct State {
@@ -78,6 +79,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                         wl: registry.bind(name, version, qh, name),
                         im: None,
                         im_active: false,
+                        im_active_sent: false,
                     },
                 );
             } else if interface == ZwpInputMethodManagerV2::interface().name {
@@ -148,16 +150,21 @@ impl Dispatch<ZwpInputMethodV2, u32> for State {
             Event::Deactivate => {
                 seat.im_active = false;
             }
-            Event::Done => futures::executor::block_on(async {
-                state
-                    .msg_tx
-                    .send(Message::SeatImActive {
-                        seat_id,
-                        active: seat.im_active,
-                    })
-                    .await
-            })
-            .expect("failed to send seat active event"),
+            // The compositor sends Done after every text_input commit
+            // Only forward on change.
+            Event::Done if seat.im_active != seat.im_active_sent => {
+                seat.im_active_sent = seat.im_active;
+                futures::executor::block_on(async {
+                    state
+                        .msg_tx
+                        .send(Message::SeatImActive {
+                            seat_id,
+                            active: seat.im_active,
+                        })
+                        .await
+                })
+                .expect("failed to send seat active event")
+            }
             //TODO: handle more events
             _ => {}
         }
