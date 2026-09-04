@@ -200,13 +200,8 @@ impl Setup {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct Layer {
-    pub rows: Vec<Vec<Key>>,
-}
-
-#[derive(Clone, Debug, Default)]
 pub struct Layout {
-    pub layers: Vec<Layer>,
+    pub rows: Vec<Vec<Key>>,
 }
 
 impl Layout {
@@ -227,7 +222,7 @@ impl Layout {
 
         let key_rows = Setup { numpad: false }.key_rows();
 
-        let mut layer = Layer::default();
+        let mut rows = Vec::new();
         for key_row in key_rows.iter() {
             let mut row = Vec::with_capacity(key_row.len());
             for &keyname in key_row.iter() {
@@ -289,10 +284,8 @@ impl Layout {
 
                 row.push(key);
             }
-            layer.rows.push(row);
+            rows.push(row);
         }
-        Layout {
-            layers: vec![layer],
-        }
+        Layout { rows }
     }
 }
