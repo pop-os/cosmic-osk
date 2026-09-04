@@ -237,7 +237,7 @@ impl App {
 
         let mut settings = SctkLayerSurfaceSettings {
             id: surface_id,
-            layer: Layer::Top,
+            layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::None,
             input_zone: None,
             anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
