@@ -108,22 +108,26 @@ pub enum GamepadAxisDirection {
 pub struct GamepadMouse {
     dx: Option<f32>,
     dy: Option<f32>,
+    scrolling: bool,
     update: Option<Instant>,
 }
 
 impl GamepadMouse {
-    pub fn frame(&mut self, instant: Instant) -> (f32, f32) {
-        //TODO: find ideal speed
-        let speed = 2000.0;
+    pub fn frame(&mut self, instant: Instant) -> Option<(f32, f32)> {
+        if self.dx.is_none() && self.dy.is_none() {
+            self.update = None;
+            return None;
+        }
+
         let duration = instant
             .checked_duration_since(self.update.unwrap_or(instant))
             .unwrap_or_default()
             .as_secs_f32();
         self.update = Some(instant);
-        (
-            self.dx.unwrap_or_default() * duration * speed,
-            -self.dy.unwrap_or_default() * duration * speed,
-        )
+        Some((
+            self.dx.unwrap_or_default() * duration,
+            -self.dy.unwrap_or_default() * duration,
+        ))
     }
 }
 
@@ -201,6 +205,7 @@ pub struct App {
     ei_button: Option<(reis::ei::Device, reis::ei::Button)>,
     ei_keyboard: Option<(reis::ei::Device, reis::ei::Keyboard)>,
     ei_pointer: Option<(reis::ei::Device, reis::ei::Pointer)>,
+    ei_scroll: Option<(reis::ei::Device, reis::ei::Scroll)>,
     gamepads: HashMap<gilrs::GamepadId, GamepadState>,
     gamepad_shown: bool,
 }
@@ -464,6 +469,7 @@ impl Application for App {
             ei_button: None,
             ei_keyboard: None,
             ei_pointer: None,
+            ei_scroll: None,
             gamepads: HashMap::new(),
             gamepad_shown: false,
         };
@@ -546,13 +552,37 @@ impl Application for App {
                 }
             }
             Message::Frame(instant) => {
-                if let Some((device, pointer)) = &self.ei_pointer {
-                    for state in self.gamepads.values_mut() {
-                        let (dx, dy) = state.mouse.frame(instant);
-                        pointer.motion_relative(dx, dy);
+                let mut frame_pointer = false;
+                let mut frame_scroll = false;
+                for state in self.gamepads.values_mut() {
+                    if let Some((dx, dy)) = state.mouse.frame(instant) {
+                        if state.mouse.scrolling {
+                            if let Some((_, scroll)) = &self.ei_scroll {
+                                //TODO: find ideal speed
+                                let speed = 1000.0;
+                                scroll.scroll(dx * speed, dy * speed);
+                                frame_scroll = true;
+                            }
+                        } else {
+                            if let Some((_, pointer)) = &self.ei_pointer {
+                                //TODO: find ideal speed
+                                let speed = 2000.0;
+                                pointer.motion_relative(dx * speed, dy * speed);
+                                frame_pointer = true;
+                            }
+                        }
                     }
+                }
+
+                if frame_pointer && let Some((device, _)) = &self.ei_pointer {
                     // TODO device frame
                     device.frame(0, 1); // TODO
+                }
+                if frame_scroll && let Some((device, _)) = &self.ei_scroll {
+                    // TODO device frame
+                    device.frame(0, 1); // TODO
+                }
+                if frame_pointer | frame_scroll {
                     self.ei_conn
                         .as_ref()
                         .unwrap()
@@ -697,8 +727,9 @@ impl Application for App {
 
                         evt.seat.bind_capabilities(
                             (DeviceCapability::Keyboard
+                                | DeviceCapability::Button
                                 | DeviceCapability::Pointer
-                                | DeviceCapability::Button)
+                                | DeviceCapability::Scroll)
                                 .into(),
                         );
                         let _ = self.ei_conn.as_ref().unwrap().flush();
@@ -723,6 +754,15 @@ impl Application for App {
                             self.ei_pointer = Some((
                                 evt.device.device().clone(),
                                 evt.device.interface::<reis::ei::Pointer>().unwrap(),
+                            ));
+                            start = true;
+                        }
+
+                        if evt.device.has_capability(DeviceCapability::Scroll) {
+                            log::info!("  has scroll");
+                            self.ei_scroll = Some((
+                                evt.device.device().clone(),
+                                evt.device.interface::<reis::ei::Scroll>().unwrap(),
                             ));
                             start = true;
                         }
@@ -918,8 +958,8 @@ impl Application for App {
                             Button::East => {
                                 return self.update(Message::Hide);
                             }
-                            // Left click on R1, right click on L1 (intentional), middle click on R3
-                            Button::LeftTrigger | Button::RightTrigger | Button::RightThumb => {
+                            // Left click on R1, right click on L1 (intentional)
+                            Button::LeftTrigger | Button::RightTrigger => {
                                 let index = match button {
                                     Button::RightTrigger => {
                                         // BTN_LEFT
@@ -928,10 +968,6 @@ impl Application for App {
                                     Button::LeftTrigger => {
                                         // BTN_RIGHT
                                         0x111
-                                    }
-                                    Button::RightThumb => {
-                                        // BTN_MIDDLE
-                                        0x112
                                     }
                                     _ => {
                                         return Task::none();
@@ -954,6 +990,12 @@ impl Application for App {
                                         .unwrap()
                                         .flush()
                                         .expect("failed to flush EI connection");
+                                }
+                            }
+                            // Toggle scrolling on right thumb
+                            Button::RightThumb => {
+                                if pressed {
+                                    state.mouse.scrolling = !state.mouse.scrolling;
                                 }
                             }
                             // Toggle docking on select
