@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use cosmic::widget;
-use xkbcommon::xkb;
+use xkbcommon::xkb::{self, Keysym};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct KeyCode(pub xkb::Keycode);
@@ -30,14 +30,173 @@ pub enum KeyKind {
 }
 
 #[derive(Clone, Debug)]
-pub struct Key {
-    pub id: widget::Id,
+pub struct KeyLevel {
     pub name: String,
     pub kind: KeyKind,
+    pub icon: Option<widget::icon::Handle>,
+}
+
+impl KeyLevel {
+    pub fn for_name(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            kind: KeyKind::Normal,
+            icon: None,
+        }
+    }
+
+    pub fn for_sym(sym: Keysym) -> Self {
+        // Default to keysym name
+        let mut name = xkb::keysym_get_name(sym);
+
+        // Prefer keysym char
+        if let Some(char) = sym.key_char() {
+            if !char.is_control() {
+                name = char.to_string();
+            }
+        }
+
+        // Translate some keysym names
+        name = match name.trim_start_matches("KP_") {
+            "Alt_L" | "Alt_R" | "Meta_L" => "Alt",
+            "Caps_Lock" => "Caps",
+            "Control_L" | "Control_R" => "Ctrl",
+            "Delete" => "Del",
+            "Escape" => "Esc",
+            "ISO_Level3_Shift" => "AltGr",
+            "Insert" => "Ins",
+            "Multi_key" => "Comp",
+            "Next" => "PgDn",
+            "Num_Lock" => "Num",
+            "Prior" => "PgUp",
+            "Super_L" | "Super_R" => "Super",
+            "Tab" | "ISO_Left_Tab" => "Tab",
+            " " => "Space",
+            other => other,
+        }
+        .to_string();
+
+        //TODO: get modifier names from xkbcommon
+        let kind = match sym {
+            // Press these modifiers until a normal key is pressed
+            Keysym::Alt_L | Keysym::Alt_R => KeyKind::Mod {
+                name: xkb::MOD_NAME_ALT,
+                sticky: true,
+            },
+            Keysym::Control_L | Keysym::Control_R => KeyKind::Mod {
+                name: xkb::MOD_NAME_CTRL,
+                sticky: true,
+            },
+            Keysym::ISO_Level3_Shift => KeyKind::Mod {
+                name: xkb::MOD_NAME_ISO_LEVEL3_SHIFT,
+                sticky: true,
+            },
+            Keysym::Shift_L | Keysym::Shift_R => KeyKind::Mod {
+                name: xkb::MOD_NAME_SHIFT,
+                sticky: true,
+            },
+            Keysym::Super_L | Keysym::Super_R => KeyKind::Mod {
+                name: xkb::MOD_NAME_LOGO,
+                sticky: true,
+            },
+            // Caps-lock already toggles itself
+            Keysym::Caps_Lock => KeyKind::Mod {
+                name: xkb::MOD_NAME_CAPS,
+                sticky: false,
+            },
+            // Num-lock already toggles itself
+            Keysym::Num_Lock => KeyKind::Mod {
+                name: xkb::MOD_NAME_NUM,
+                sticky: false,
+            },
+            // Normal keys
+            _ => KeyKind::Normal,
+        };
+
+        let icon = match sym {
+            Keysym::BackSpace => Some(widget::icon::from_name("edit-clear-symbolic").handle()),
+            Keysym::Return => Some(
+                widget::icon::from_svg_bytes(include_bytes!("../res/keycap-return.svg"))
+                    .symbolic(true),
+            ),
+            Keysym::Down => Some(widget::icon::from_name("pan-down-symbolic").handle()),
+            Keysym::Left => Some(widget::icon::from_name("pan-start-symbolic").handle()),
+            Keysym::Shift_L | Keysym::Shift_R => Some(
+                widget::icon::from_svg_bytes(include_bytes!("../res/keycap-shift.svg"))
+                    .symbolic(true),
+            ),
+            Keysym::Right => Some(widget::icon::from_name("pan-end-symbolic").handle()),
+            Keysym::Up => Some(widget::icon::from_name("pan-up-symbolic").handle()),
+            Keysym::XF86_AudioNext => {
+                Some(widget::icon::from_name("media-seek-forward-symbolic").handle())
+            }
+            Keysym::XF86_AudioPlay => {
+                Some(widget::icon::from_name("media-playback-start-symbolic").handle())
+            }
+            Keysym::XF86_AudioPause => {
+                Some(widget::icon::from_name("media-playback-pause-symbolic").handle())
+            }
+            Keysym::XF86_AudioPrev => {
+                Some(widget::icon::from_name("media-seek-backward-symbolic").handle())
+            }
+            _ => None,
+        };
+
+        Self { name, kind, icon }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Key {
+    pub id: widget::Id,
+    pub levels: Vec<KeyLevel>,
     pub width: f32,
     pub keycode: Option<KeyCode>,
     pub gamepad_mapping: Option<gilrs::Button>,
-    pub icon: Option<widget::icon::Handle>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Setup {
+    pub numpad: bool,
+}
+
+impl Setup {
+    pub fn key_rows(&self) -> Vec<Vec<&'static str>> {
+        let mut key_rows = Vec::new();
+        key_rows.push(vec![
+            "ESC", "FK01", "FK02", "FK03", "FK04", "FK05", "FK06", "FK07", "FK08", "FK09", "FK10",
+            "FK11", "FK12", "DELE", "HOME",
+        ]);
+        key_rows.push(vec![
+            "TLDE", "AE01", "AE02", "AE03", "AE04", "AE05", "AE06", "AE07", "AE08", "AE09", "AE10",
+            "AE11", "AE12", "BKSP", "PGUP",
+        ]);
+        key_rows.push(vec![
+            "TAB", "AD01", "AD02", "AD03", "AD04", "AD05", "AD06", "AD07", "AD08", "AD09", "AD10",
+            "AD11", "AD12", "BKSL", "PGDN",
+        ]);
+        key_rows.push(vec![
+            "CAPS", "AC01", "AC02", "AC03", "AC04", "AC05", "AC06", "AC07", "AC08", "AC09", "AC10",
+            "AC11", "RTRN", "END",
+        ]);
+        key_rows.push(vec![
+            "LFSH", "AB01", "AB02", "AB03", "AB04", "AB05", "AB06", "AB07", "AB08", "AB09", "AB10",
+            "RTSH", "UP", "INS",
+        ]);
+        key_rows.push(vec![
+            "LCTL", "LALT", "LWIN", "SPCE", "RALT", "RWIN", "RCTL", "LEFT", "DOWN", "RGHT",
+        ]);
+        if self.numpad {
+            //TODO: come up with a way to have multi-row keys for KPAD and KPEN
+            key_rows[0].extend_from_slice(&["PRSC", "I173", "I172", "I171"]);
+            key_rows[1].extend_from_slice(&["NMLK", "KPDV", "KPMU", "KPSU"]);
+            key_rows[2].extend_from_slice(&["KP7", "KP8", "KP9", "KPAD"]);
+            key_rows[3].extend_from_slice(&["KP4", "KP5", "KP6", "KPAD"]);
+            key_rows[4].extend_from_slice(&["KP1", "KP2", "KP3", "KPEN"]);
+            key_rows[5].extend_from_slice(&["KP0", "KPDL", "KPEQ", "KPEN"]);
+        }
+        key_rows
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -66,66 +225,32 @@ impl Layout {
     fn new(keymap: &xkb::Keymap, layout: u32) -> Self {
         assert!(keymap.num_layouts() > layout);
 
-        let key_rows: &'static [&'static [&'static str]] = &[
-            &[
-                "ESC", "FK01", "FK02", "FK03", "FK04", "FK05", "FK06", "FK07", "FK08", "FK09",
-                "FK10", "FK11", "FK12", "DELE", "HOME",
-            ],
-            &[
-                "TLDE", "AE01", "AE02", "AE03", "AE04", "AE05", "AE06", "AE07", "AE08", "AE09",
-                "AE10", "AE11", "AE12", "BKSP", "PGUP",
-            ],
-            &[
-                "TAB", "AD01", "AD02", "AD03", "AD04", "AD05", "AD06", "AD07", "AD08", "AD09",
-                "AD10", "AD11", "AD12", "BKSL", "PGDN",
-            ],
-            &[
-                "CAPS", "AC01", "AC02", "AC03", "AC04", "AC05", "AC06", "AC07", "AC08", "AC09",
-                "AC10", "AC11", "RTRN", "END",
-            ],
-            &[
-                "LFSH", "AB01", "AB02", "AB03", "AB04", "AB05", "AB06", "AB07", "AB08", "AB09",
-                "AB10", "RTSH", "UP", "INS",
-            ],
-            &[
-                "LCTL", "LALT", "LWIN", "SPCE", "RALT", "RWIN", "RCTL", "LEFT", "DOWN", "RGHT",
-            ],
-        ];
+        let key_rows = Setup { numpad: false }.key_rows();
 
-        let mut normal_layer = Layer::default();
-        let mut shift_layer = Layer::default();
+        let mut layer = Layer::default();
         for key_row in key_rows.iter() {
-            let mut normal_row = Vec::with_capacity(key_row.len());
-            let mut shift_row = Vec::with_capacity(key_row.len());
-            for &key in key_row.iter() {
-                let kind = match key {
-                    // Press these modifiers until a normal key is pressed
-                    "LALT" | "RALT" => KeyKind::Mod {
-                        name: xkb::MOD_NAME_ALT,
-                        sticky: true,
-                    },
-                    "LCTL" | "RCTL" => KeyKind::Mod {
-                        name: xkb::MOD_NAME_CTRL,
-                        sticky: true,
-                    },
-                    "LFSH" | "RTSH" => KeyKind::Mod {
-                        name: xkb::MOD_NAME_SHIFT,
-                        sticky: true,
-                    },
-                    "LWIN" | "RWIN" => KeyKind::Mod {
-                        name: xkb::MOD_NAME_LOGO,
-                        sticky: true,
-                    },
-                    // Caps-lock already toggles itself
-                    "CAPS" => KeyKind::Mod {
-                        name: xkb::MOD_NAME_CAPS,
-                        sticky: false,
-                    },
-                    // Normal keys
-                    _ => KeyKind::Normal,
+            let mut row = Vec::with_capacity(key_row.len());
+            for &keyname in key_row.iter() {
+                let width = match keyname {
+                    "BKSL" => 1.5,
+                    "BKSP" => 2.0,
+                    "DELE" => 2.0,
+                    "CAPS" => 1.75,
+                    "LALT" => 1.25,
+                    "LCTL" => 1.25,
+                    "LFSH" => 2.25,
+                    "LWIN" => 1.25,
+                    "RALT" => 1.25,
+                    "RCTL" => 1.25,
+                    "RTSH" => 1.75,
+                    "RTRN" => 2.25,
+                    "RWIN" => 1.25,
+                    "SPCE" => 5.5,
+                    "TAB" => 1.5,
+                    _ => 1.0,
                 };
 
-                let gamepad_mapping = match key {
+                let gamepad_mapping = match keyname {
                     "BKSP" => Some(gilrs::Button::West),
                     "CAPS" => Some(gilrs::Button::LeftThumb),
                     "LFSH" => Some(gilrs::Button::LeftTrigger2),
@@ -134,102 +259,40 @@ impl Layout {
                     _ => None,
                 };
 
-                let icon = match key {
-                    "BKSP" => Some(include_str!("../res/edit-clear-symbolic.svg")),
-                    "RTRN" => Some(include_str!("../res/keycap-return.svg")),
-                    "DOWN" => Some(include_str!("../res/pan-down-symbolic.svg")),
-                    "LEFT" => Some(include_str!("../res/pan-start-symbolic.svg")),
-                    "LFSH" | "RTSH" => Some(include_str!("../res/keycap-shift.svg")),
-                    "RGHT" => Some(include_str!("../res/pan-end-symbolic.svg")),
-                    "UP" => Some(include_str!("../res/pan-up-symbolic.svg")),
-                    _ => None,
-                }
-                .map(|data| widget::icon::from_svg_bytes(data.as_bytes()).symbolic(true));
-
-                let mut normal_key = Key {
+                let mut key = Key {
                     id: widget::Id::unique(),
-                    name: key.to_string(),
-                    kind,
-                    width: 1.0,
+                    levels: vec![KeyLevel::for_name(keyname)],
+                    width,
                     keycode: None,
                     gamepad_mapping,
-                    icon,
                 };
-                let mut shift_key = normal_key.clone();
 
-                match keymap.key_by_name(key) {
+                match keymap.key_by_name(keyname) {
                     Some(kc) => {
-                        normal_key.keycode = Some(KeyCode(kc));
-                        shift_key.keycode = Some(KeyCode(kc));
+                        key.keycode = Some(KeyCode(kc));
 
-                        let normal_syms = keymap.key_get_syms_by_level(kc, layout, 0);
-                        if let Some(normal_sym) = normal_syms.get(0) {
-                            normal_key.name = xkb::keysym_get_name(*normal_sym);
-                            if let Some(normal_char) = normal_sym.key_char() {
-                                if !normal_char.is_control() {
-                                    normal_key.name = normal_char.to_string();
-                                }
+                        for level in 0..keymap.num_levels_for_key(kc, layout) as usize {
+                            while key.levels.len() <= level {
+                                key.levels.push(KeyLevel::for_name(keyname));
                             }
 
-                            // Copy normal key name over by default
-                            shift_key.name = normal_key.name.clone();
-                        }
-
-                        let shift_syms = keymap.key_get_syms_by_level(kc, layout, 1);
-                        if let Some(shift_sym) = shift_syms.get(0) {
-                            shift_key.name = xkb::keysym_get_name(*shift_sym);
-                            if let Some(shift_char) = shift_sym.key_char() {
-                                if !shift_char.is_control() {
-                                    shift_key.name = shift_char.to_string();
-                                }
+                            let syms = keymap.key_get_syms_by_level(kc, layout, level as u32);
+                            if let Some(sym) = syms.get(0) {
+                                key.levels[level] = KeyLevel::for_sym(*sym);
                             }
                         }
                     }
                     None => {
-                        eprintln!("cannot find keycode for {:?} in keymap", key);
+                        eprintln!("cannot find keycode for {:?} in keymap", keyname);
                     }
                 }
 
-                let name_width = match key {
-                    "BKSL" => {
-                        normal_key.width = 1.5;
-                        shift_key.width = 1.5;
-                        None
-                    }
-                    "BKSP" => Some(("Bksp", 2.0)),
-                    "DELE" => Some(("Del", 2.0)),
-                    "CAPS" => Some(("Caps", 1.75)),
-                    "ESC" => Some(("Esc", 1.0)),
-                    "LALT" => Some(("Alt", 1.25)),
-                    "LCTL" => Some(("Ctrl", 1.25)),
-                    "LFSH" => Some(("Shift", 2.25)),
-                    "LWIN" => Some(("Super", 1.25)),
-                    "PGDN" => Some(("PgDn", 1.0)),
-                    "PGUP" => Some(("PgUp", 1.0)),
-                    "RALT" => Some(("Alt", 1.25)),
-                    "RCTL" => Some(("Ctrl", 1.25)),
-                    "RTSH" => Some(("Shift", 1.75)),
-                    "RTRN" => Some(("Enter", 2.25)),
-                    "RWIN" => Some(("Super", 1.25)),
-                    "SPCE" => Some(("Space", 5.5)),
-                    "TAB" => Some(("Tab", 1.5)),
-                    _ => None,
-                };
-                if let Some((name, width)) = name_width {
-                    normal_key.name = name.to_string();
-                    normal_key.width = width;
-                    shift_key.name = name.to_string();
-                    shift_key.width = width;
-                }
-
-                normal_row.push(normal_key);
-                shift_row.push(shift_key);
+                row.push(key);
             }
-            normal_layer.rows.push(normal_row);
-            shift_layer.rows.push(shift_row);
+            layer.rows.push(row);
         }
         Layout {
-            layers: vec![normal_layer, shift_layer],
+            layers: vec![layer],
         }
     }
 }

@@ -264,7 +264,23 @@ impl App {
             settings.exclusive_zone = 0;
         }
 
+        log::info!("get_layer_surface");
         get_layer_surface(settings)
+    }
+
+    pub fn key_level<'a>(&'a self, key: &'a layout::Key) -> &'a layout::KeyLevel {
+        let mut level = 0;
+        if let Some(keycode) = key.keycode
+            && let Some(xkb_state) = &self.xkb_state
+        {
+            level = usize::try_from(xkb_state.key_get_level(keycode.xkb(), self.group))
+                .unwrap_or_default();
+            if level >= key.levels.len() {
+                log::debug!("key {:?} does not have level {}", key.levels[0].name, level);
+                level = 0;
+            }
+        }
+        &key.levels[level]
     }
 
     pub fn layout_layer(&self) -> Option<&layout::Layer> {
@@ -615,19 +631,12 @@ impl Application for App {
                         .flush()
                         .expect("failed to flush EI connection");
                 }
-
-                //TODO: use xkb::State::key_get_level
-                let shift =
-                    xkb_state.mod_name_is_active(xkb::MOD_NAME_SHIFT, xkb::STATE_MODS_EFFECTIVE);
-                let caps =
-                    xkb_state.mod_name_is_active(xkb::MOD_NAME_CAPS, xkb::STATE_MODS_EFFECTIVE);
-                self.layer = if shift != caps { 1 } else { 0 };
             }
             Message::Quit => {
                 process::exit(0);
             }
             Message::SeatImActive { seat_id, active } => {
-                eprintln!("{} active: {}", seat_id, active);
+                log::info!("{} active: {}", seat_id, active);
                 if active {
                     if !self.ignore_activate {
                         return self.show();
@@ -637,7 +646,7 @@ impl Application for App {
                 }
             }
             Message::Size(size) => {
-                eprintln!("size: {:?}", size);
+                log::info!("size: {:?}", size);
                 if let Some(surface_id) = self.surface_id
                     && !self.docked
                 {
@@ -678,7 +687,7 @@ impl Application for App {
                     ei::Msg::Event(reis::event::EiEvent::SeatAdded(evt)) => {
                         use reis::event::DeviceCapability;
 
-                        eprintln!("{:?}", evt);
+                        log::info!("{:?}", evt);
 
                         evt.seat.bind_capabilities(
                             (DeviceCapability::Keyboard
@@ -691,11 +700,11 @@ impl Application for App {
                     ei::Msg::Event(reis::event::EiEvent::DeviceAdded(evt)) => {
                         use reis::event::DeviceCapability;
 
-                        eprintln!("{:?}", evt);
+                        log::info!("{:?}", evt);
                         let mut start = false;
 
                         if evt.device.has_capability(DeviceCapability::Button) {
-                            eprintln!("  has button");
+                            log::info!("  has button");
                             self.ei_button = Some((
                                 evt.device.device().clone(),
                                 evt.device.interface::<reis::ei::Button>().unwrap(),
@@ -704,7 +713,7 @@ impl Application for App {
                         }
 
                         if evt.device.has_capability(DeviceCapability::Pointer) {
-                            eprintln!("  has pointer");
+                            log::info!("  has pointer");
                             self.ei_pointer = Some((
                                 evt.device.device().clone(),
                                 evt.device.interface::<reis::ei::Pointer>().unwrap(),
@@ -713,7 +722,7 @@ impl Application for App {
                         }
 
                         if evt.device.has_capability(DeviceCapability::Keyboard) {
-                            eprintln!("  has keyboard");
+                            log::info!("  has keyboard");
                             self.ei_keyboard = Some((
                                 evt.device.device().clone(),
                                 evt.device.interface::<reis::ei::Keyboard>().unwrap(),
@@ -861,8 +870,9 @@ impl Application for App {
                             Button::South => {
                                 if let Some((_, _, key)) = self.find_focus() {
                                     if let Some(keycode) = key.keycode {
+                                        let key_level = self.key_level(&key);
                                         return self.update(Message::Key {
-                                            kind: key.kind,
+                                            kind: key_level.kind,
                                             keycode,
                                             pressed,
                                         });
@@ -873,14 +883,24 @@ impl Application for App {
                             Button::East => {
                                 return self.update(Message::Quit);
                             }
-                            // Left click on R1, right click on L1 (intentional)
-                            Button::LeftTrigger | Button::RightTrigger => {
-                                let index = if matches!(button, Button::LeftTrigger) {
-                                    // BTN_RIGHT
-                                    0x111
-                                } else {
-                                    // BTN_LEFT
-                                    0x110
+                            // Left click on R1, right click on L1 (intentional), middle click on R3
+                            Button::LeftTrigger | Button::RightTrigger | Button::RightThumb => {
+                                let index = match button {
+                                    Button::RightTrigger => {
+                                        // BTN_LEFT
+                                        0x110
+                                    }
+                                    Button::LeftTrigger => {
+                                        // BTN_RIGHT
+                                        0x111
+                                    }
+                                    Button::RightThumb => {
+                                        // BTN_MIDDLE
+                                        0x112
+                                    }
+                                    _ => {
+                                        return Task::none();
+                                    }
                                 };
                                 if let Some((device, button)) = &self.ei_button {
                                     button.button(
@@ -901,8 +921,8 @@ impl Application for App {
                                         .expect("failed to flush EI connection");
                                 }
                             }
-                            // Toggle docking on R3
-                            Button::RightThumb => {
+                            // Toggle docking on select
+                            Button::Select => {
                                 if pressed {
                                     return self.update(Message::Dock(!self.docked));
                                 }
@@ -951,6 +971,14 @@ impl Application for App {
         let element: Element<_> = if let Some(layout_layer) = self.layout_layer() {
             let mut grid = widget::column::with_capacity(layout_layer.rows.len() + 1);
             grid = grid.push(widget::row::with_children(vec![
+                widget::button::icon(
+                    widget::icon::from_svg_bytes(include_bytes!(
+                        "../res/preferences-desktop-keyboard-symbolic.svg"
+                    ))
+                    .symbolic(true),
+                )
+                .into(),
+                widget::button::icon(widget::icon::from_name("view-more-symbolic")).into(),
                 widget::space().width(Length::Fill).into(),
                 if self.docked {
                     widget::button::icon(
@@ -978,10 +1006,12 @@ impl Application for App {
                 let mut r = widget::row::with_capacity(layout_row.len() + 2);
                 r = r.push(widget::space().width(Length::Fill));
                 for key in layout_row.iter() {
+                    let key_level = self.key_level(&key);
+
                     let mut pressed = false;
                     let mut selected = false;
                     if let Some(kc) = key.keycode {
-                        if let layout::KeyKind::Mod { name, sticky } = key.kind {
+                        if let layout::KeyKind::Mod { name, sticky } = key_level.kind {
                             if sticky {
                                 if self.sticky.contains(&kc) {
                                     selected = true;
@@ -1096,12 +1126,12 @@ impl Application for App {
                         }
                     }
 
-                    if let Some(icon) = &key.icon {
+                    if let Some(icon) = &key_level.icon {
                         button_row = button_row.push(widget::icon(icon.clone()).size(20));
                     } else {
                         button_row = button_row.push(
-                            widget::Text::new(&key.name)
-                                .size(if key.name.chars().count() <= 1 {
+                            widget::Text::new(&key_level.name)
+                                .size(if key_level.name.chars().count() <= 1 {
                                     18
                                 } else {
                                     16
@@ -1125,12 +1155,12 @@ impl Application for App {
                     if let Some(keycode) = key.keycode {
                         button = button
                             .on_press_down(Message::Key {
-                                kind: key.kind,
+                                kind: key_level.kind,
                                 keycode,
                                 pressed: true,
                             })
                             .on_press(Message::Key {
-                                kind: key.kind,
+                                kind: key_level.kind,
                                 keycode,
                                 pressed: false,
                             });

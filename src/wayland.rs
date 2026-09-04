@@ -71,7 +71,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
         } = event
         {
             if interface == WlSeat::interface().name {
-                eprintln!("Seat");
+                log::info!("Seat");
                 state.seats.insert(
                     name,
                     Seat {
@@ -81,7 +81,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                     },
                 );
             } else if interface == ZwpInputMethodManagerV2::interface().name {
-                eprintln!("Input Method Interface");
+                log::info!("Input Method Interface");
                 assert!(state.imm.is_none());
                 state.imm = Some(registry.bind(name, version, qh, ()));
             }
@@ -99,17 +99,17 @@ impl Dispatch<WlSeat, u32> for State {
         qh: &QueueHandle<Self>,
     ) {
         use wl_seat::Event;
-        eprintln!("Seat {seat_id} event: {event:?}");
+        log::info!("Seat {seat_id} event: {event:?}");
         match event {
             Event::Capabilities { capabilities } => {
                 let WEnum::Value(caps) = capabilities else {
-                    eprintln!("invalid seat {seat_id} capabilities {capabilities:?}");
+                    log::info!("invalid seat {seat_id} capabilities {capabilities:?}");
                     return;
                 };
                 if caps.contains(wl_seat::Capability::Keyboard) {
-                    eprintln!("Seat {seat_id} keyboard");
+                    log::info!("Seat {seat_id} keyboard");
                     let Some(seat) = state.seats.get_mut(&seat_id) else {
-                        eprintln!("failed to find seat {seat_id}");
+                        log::info!("failed to find seat {seat_id}");
                         return;
                     };
 
@@ -117,7 +117,7 @@ impl Dispatch<WlSeat, u32> for State {
                         seat.im
                             .get_or_insert_with(|| imm.get_input_method(&seat.wl, qh, seat_id));
                     } else {
-                        eprintln!("no input method manager found");
+                        log::info!("no input method manager found");
                     }
                 }
             }
@@ -137,9 +137,10 @@ impl Dispatch<ZwpInputMethodV2, u32> for State {
     ) {
         use zwp_input_method_v2::Event;
         let Some(seat) = state.seats.get_mut(&seat_id) else {
-            eprintln!("seat {seat_id} not found");
+            log::info!("seat {seat_id} not found");
             return;
         };
+        log::info!("seat {} input method: {:?}", seat_id, event);
         match event {
             Event::Activate => {
                 seat.im_active = true;
