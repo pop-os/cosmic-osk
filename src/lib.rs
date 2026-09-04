@@ -192,7 +192,6 @@ pub struct App {
     key_size: usize,
     layouts: Option<Vec<Layout>>,
     group: u32,
-    layer: usize,
     pressed: HashMap<layout::KeyCode, layout::KeyKind>,
     sticky: HashSet<layout::KeyCode>,
     size: Size,
@@ -229,17 +228,14 @@ impl App {
         self.surface_rect.height = 0.0;
         if let Some(layouts) = &self.layouts {
             for layout in layouts.iter() {
-                for layer in layout.layers.iter() {
-                    let layer_height = (self.key_size + self.key_padding * 2) * layer.rows.len();
-                    self.surface_rect.height = self.surface_rect.height.max(layer_height as f32);
-                    for row in layer.rows.iter() {
-                        let mut row_width = 0.0;
-                        for key in row.iter() {
-                            row_width +=
-                                key.width * (self.key_size as f32) + self.key_padding as f32;
-                        }
-                        self.surface_rect.width = self.surface_rect.width.max(row_width);
+                let layer_height = (self.key_size + self.key_padding * 2) * layout.rows.len();
+                self.surface_rect.height = self.surface_rect.height.max(layer_height as f32);
+                for row in layout.rows.iter() {
+                    let mut row_width = 0.0;
+                    for key in row.iter() {
+                        row_width += key.width * (self.key_size as f32) + self.key_padding as f32;
                     }
+                    self.surface_rect.width = self.surface_rect.width.max(row_width);
                 }
             }
         }
@@ -295,15 +291,13 @@ impl App {
         &key.levels[level]
     }
 
-    pub fn layout_layer(&self) -> Option<&layout::Layer> {
-        self.layouts
-            .as_ref()
-            .and_then(|layouts| layouts.get(self.group as usize)?.layers.get(self.layer))
+    pub fn layout(&self) -> Option<&layout::Layout> {
+        self.layouts.as_ref()?.get(self.group as usize)
     }
 
     pub fn focus_index(&self) -> (usize, usize) {
-        if let Some(layout_layer) = self.layout_layer() {
-            for (y, layout_row) in layout_layer.rows.iter().enumerate() {
+        if let Some(layout) = self.layout() {
+            for (y, layout_row) in layout.rows.iter().enumerate() {
                 for (x, key) in layout_row.iter().enumerate() {
                     if Some(&key.id) == self.focus.as_ref() {
                         return (x, y);
@@ -316,8 +310,8 @@ impl App {
     }
 
     pub fn find_focus(&self) -> Option<((usize, usize), Rectangle, layout::Key)> {
-        if let Some(layout_layer) = self.layout_layer() {
-            for (row_i, row) in layout_layer.rows.iter().enumerate() {
+        if let Some(layout) = self.layout() {
+            for (row_i, row) in layout.rows.iter().enumerate() {
                 let mut x = 0.0;
                 for (col_i, key) in row.iter().enumerate() {
                     if Some(&key.id) == self.focus.as_ref() {
@@ -348,8 +342,8 @@ impl App {
         };
 
         let mut focus = None;
-        if let Some(layout_layer) = self.layout_layer() {
-            if let Some(row) = layout_layer.rows.get(index.0) {
+        if let Some(layout) = self.layout() {
+            if let Some(row) = layout.rows.get(index.0) {
                 match dir {
                     FocusDirection::Left => {
                         if index.1 == 0 {
@@ -369,7 +363,7 @@ impl App {
                         } else {
                             index.0.saturating_add(1)
                         };
-                        if let Some(next_row) = layout_layer.rows.get(row_i) {
+                        if let Some(next_row) = layout.rows.get(row_i) {
                             let mut max_col_i = None;
                             let mut max_overlap = 0.0;
                             let mut x = 0.0;
@@ -456,7 +450,6 @@ impl Application for App {
             ignore_activate: false,
             key_padding: 4,
             key_size: 64,
-            layer: 0,
             layouts: None,
             group: 0,
             pressed: HashMap::new(),
@@ -784,7 +777,6 @@ impl Application for App {
                             let layouts =
                                 Layout::all(&xkb_keymap).unwrap_or_else(|| vec![Layout::default()]);
 
-                            self.layer = 0;
                             self.layouts = Some(layouts);
                             self.xkb_state = Some(xkb::State::new(&xkb_keymap));
 
@@ -1008,8 +1000,8 @@ impl Application for App {
                             }
                             // Search for layout specific mappings
                             _ => {
-                                if let Some(layout_layer) = self.layout_layer() {
-                                    for row in layout_layer.rows.iter() {
+                                if let Some(layout) = self.layout() {
+                                    for row in layout.rows.iter() {
                                         for key in row.iter() {
                                             if key.gamepad_mapping == Some(button) {
                                                 if let Some(keycode) = key.keycode {
@@ -1047,8 +1039,8 @@ impl Application for App {
             ..
         } = theme::spacing();
 
-        let element: Element<_> = if let Some(layout_layer) = self.layout_layer() {
-            let mut grid = widget::column::with_capacity(layout_layer.rows.len() + 1);
+        let element: Element<_> = if let Some(layout) = self.layout() {
+            let mut grid = widget::column::with_capacity(layout.rows.len() + 1);
             grid = grid.push(widget::row::with_children(vec![
                 widget::button::icon(
                     widget::icon::from_svg_bytes(include_bytes!(
@@ -1081,7 +1073,7 @@ impl Application for App {
                     .on_press(Message::Quit)
                     .into(),
             ]));
-            for layout_row in layout_layer.rows.iter() {
+            for layout_row in layout.rows.iter() {
                 let mut r = widget::row::with_capacity(layout_row.len() + 2);
                 r = r.push(widget::space().width(Length::Fill));
                 for key in layout_row.iter() {
