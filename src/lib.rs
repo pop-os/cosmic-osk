@@ -185,7 +185,7 @@ pub struct App {
     pressed: HashMap<layout::KeyCode, layout::KeyKind>,
     sticky: HashSet<layout::KeyCode>,
     size: Size,
-    surface_center: bool,
+    surface_auto_pos: bool,
     surface_id: Option<window::Id>,
     surface_rect: Rectangle,
     xkb_state: Option<xkb::State>,
@@ -259,7 +259,6 @@ impl App {
         // Adjustments for floating mode
         if !self.docked {
             settings.anchor |= Anchor::TOP;
-            //TODO: center by default
             settings.input_zone = Some(vec![self.surface_rect]);
             settings.size = None;
             settings.exclusive_zone = 0;
@@ -435,7 +434,7 @@ impl Application for App {
             pressed: HashMap::new(),
             sticky: HashSet::new(),
             size: Size::default(),
-            surface_center: true,
+            surface_auto_pos: true,
             surface_id: None,
             surface_rect: Rectangle::default(),
             xkb_state: None,
@@ -490,8 +489,8 @@ impl Application for App {
                             .y
                             .min(self.size.height - self.drag.surface_rect.height)
                             .max(0.0);
-                        // Do not center on display after drag
-                        self.surface_center = false;
+                        // Do not auto position on display after drag
+                        self.surface_auto_pos = false;
                     } else {
                         self.drag.start_pos = self.drag.mouse_pos;
                     }
@@ -644,9 +643,10 @@ impl Application for App {
                 {
                     let mut tasks = Vec::with_capacity(2);
                     self.size = size;
-                    if self.surface_center {
+                    if self.surface_auto_pos {
+                        // Automatically position at center bottom when first floated
                         self.surface_rect.x = (size.width - self.surface_rect.width) / 2.0;
-                        self.surface_rect.y = (size.height - self.surface_rect.height) / 2.0;
+                        self.surface_rect.y = (size.height - self.surface_rect.height);
                         tasks.push(set_input_zone(surface_id, Some(vec![self.surface_rect])));
                     }
                     let t = cosmic::theme::active();
