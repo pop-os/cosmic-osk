@@ -915,7 +915,8 @@ impl Application for App {
                                             if key.gamepad_mapping == Some(button) {
                                                 if let Some(keycode) = key.keycode {
                                                     return self.update(Message::Key {
-                                                        kind: key.kind,
+                                                        // Use normal type to avoid sticky modifiers
+                                                        kind: layout::KeyKind::Normal,
                                                         keycode,
                                                         pressed,
                                                     });
