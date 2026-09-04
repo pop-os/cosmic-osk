@@ -633,14 +633,6 @@ impl Application for App {
                         } else {
                             self.pressed.remove(&keycode);
                         }
-                        xkb_state.update_key(
-                            keycode.xkb(),
-                            if pressed {
-                                xkb::KeyDirection::Down
-                            } else {
-                                xkb::KeyDirection::Up
-                            },
-                        );
                         keyboard.key(
                             keycode.evdev(),
                             if pressed {
@@ -806,9 +798,18 @@ impl Application for App {
                             evt.device.device().start_emulating(0, serial);
                         }
                     }
-                    // TODO handle other modifiers
                     ei::Msg::Event(reis::event::EiEvent::KeyboardModifiers(evt)) => {
                         self.group = evt.group;
+                        if let Some(xkb_state) = &mut self.xkb_state {
+                            xkb_state.update_mask(
+                                evt.depressed,
+                                evt.latched,
+                                evt.locked,
+                                evt.group,
+                                evt.group,
+                                evt.group,
+                            );
+                        }
                     }
                     _ => {}
                 }
