@@ -216,16 +216,18 @@ impl Application for App {
                         .expect("failed to flush EI connection");
                 }
 
-                //TODO: use xkb::State::key_get_level
-                let shift =
-                    xkb_state.mod_name_is_active(xkb::MOD_NAME_SHIFT, xkb::STATE_MODS_EFFECTIVE);
-                let caps =
-                    xkb_state.mod_name_is_active(xkb::MOD_NAME_CAPS, xkb::STATE_MODS_EFFECTIVE);
-                self.layer = match (shift, caps) {
-                    (true, false) => 1,
-                    (false, true) => 2,
-                    _ => 0,
-                };
+                let num_mods_active = xkb_state
+                    .get_keymap()
+                    .mods()
+                    .into_iter()
+                    .filter(|mod_name| {
+                        xkb_state.mod_name_is_active(mod_name, xkb::STATE_MODS_EFFECTIVE)
+                    })
+                    .count();
+
+                // layer[0]: base layer
+                // layer[1]: modifier layer
+                self.layer = if num_mods_active > 0 { 1 } else { 0 };
             }
             Message::Quit => {
                 process::exit(0);
@@ -302,9 +304,38 @@ impl Application for App {
                             });
                         }
                     }
-                    // TODO handle other modifiers
                     ei::Msg::Event(reis::event::EiEvent::KeyboardModifiers(evt)) => {
                         self.group = evt.group;
+                        if let Some(state) = &mut self.xkb_state {
+                            state.update_mask(evt.depressed, evt.latched, evt.locked, 0, 0, 0);
+
+                            // update the modifier layer's key names
+                            let layers: &mut Vec<layout::Layer> = self
+                                .layouts
+                                .as_mut()
+                                .unwrap()
+                                .first_mut()
+                                .unwrap()
+                                .layers
+                                .as_mut();
+                            let mod_layer = layers.get_mut(1).unwrap();
+                            let key_names_unchanged = &[
+                                "Bksp", "Del", "Caps", "Esc", "Alt", "Ctrl", "Shift", "Super",
+                                "PgDn", "PgUp", "Enter", " ", "Tab", "F1", "F2", "F3", "F4", "F5",
+                                "F6", "F7", "F8", "F9", "F10", "F11", "F12", "Home", "Up", "Left",
+                                "Down", "Up", "Right", "Insert", "End",
+                            ];
+                            for rows in mod_layer.rows.iter_mut() {
+                                for keycode in rows {
+                                    if !key_names_unchanged.contains(&keycode.name.as_ref()) {
+                                        let sym_new =
+                                            state.key_get_one_sym(keycode.keycode.unwrap().xkb());
+                                        let sym_new = xkb::keysym_to_utf8(sym_new);
+                                        keycode.name = sym_new.to_string();
+                                    }
+                                }
+                            }
+                        }
                     }
                     _ => {}
                 }
