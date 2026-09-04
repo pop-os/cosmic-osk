@@ -127,6 +127,13 @@ impl GamepadMouse {
     }
 }
 
+#[derive(Default)]
+pub struct GamepadState {
+    pub axes: HashMap<gilrs::Axis, GamepadAxisDirection>,
+    pub buttons: HashSet<gilrs::Button>,
+    pub mouse: GamepadMouse,
+}
+
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum Message {
@@ -194,8 +201,7 @@ pub struct App {
     ei_button: Option<(reis::ei::Device, reis::ei::Button)>,
     ei_keyboard: Option<(reis::ei::Device, reis::ei::Keyboard)>,
     ei_pointer: Option<(reis::ei::Device, reis::ei::Pointer)>,
-    gamepad_axes: HashMap<gilrs::Axis, GamepadAxisDirection>,
-    gamepad_mouse: GamepadMouse,
+    gamepads: HashMap<gilrs::GamepadId, GamepadState>,
     gamepad_shown: bool,
 }
 
@@ -237,7 +243,7 @@ impl App {
 
         let mut settings = SctkLayerSurfaceSettings {
             id: surface_id,
-            layer: Layer::Overlay,
+            layer: Layer::Top,
             keyboard_interactivity: KeyboardInteractivity::None,
             input_zone: None,
             anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
@@ -458,8 +464,7 @@ impl Application for App {
             ei_button: None,
             ei_keyboard: None,
             ei_pointer: None,
-            gamepad_axes: HashMap::new(),
-            gamepad_mouse: GamepadMouse::default(),
+            gamepads: HashMap::new(),
             gamepad_shown: false,
         };
 
@@ -541,10 +546,11 @@ impl Application for App {
                 }
             }
             Message::Frame(instant) => {
-                //TODO: scale with instant from last event
                 if let Some((device, pointer)) = &self.ei_pointer {
-                    let (dx, dy) = self.gamepad_mouse.frame(instant);
-                    pointer.motion_relative(dx, dy);
+                    for state in self.gamepads.values_mut() {
+                        let (dx, dy) = state.mouse.frame(instant);
+                        pointer.motion_relative(dx, dy);
+                    }
                     // TODO device frame
                     device.frame(0, 1); // TODO
                     self.ei_conn
@@ -767,8 +773,37 @@ impl Application for App {
                 }
             }
             Message::Gilrs(event) => {
+                let state = self
+                    .gamepads
+                    .entry(event.id)
+                    .or_insert_with(|| GamepadState::default());
+
+                match event.event {
+                    EventType::ButtonPressed(button, _) => {
+                        state.buttons.insert(button);
+                    }
+                    EventType::ButtonReleased(button, _) => {
+                        state.buttons.remove(&button);
+                    }
+                    _ => {}
+                }
+
                 // Only handle gamepad events if surface is visible
                 if self.surface_id.is_none() {
+                    // Show on Start+Select gesture
+                    if state.buttons.contains(&Button::Start)
+                        && state.buttons.contains(&Button::Select)
+                        && self.surface_id.is_none()
+                    {
+                        return self.show();
+                    }
+
+                    // Clear axes and mouse state
+                    for state in self.gamepads.values_mut() {
+                        state.axes.clear();
+                        state.mouse = Default::default();
+                    }
+
                     return Task::none();
                 }
 
@@ -782,7 +817,7 @@ impl Application for App {
                         // Emulate a dpad press on left axis movement
                         const AXIS_OFF: f32 = 0.25;
                         const AXIS_ON: f32 = 0.5;
-                        let last_dir = self.gamepad_axes.get(&axis).copied().unwrap_or_default();
+                        let last_dir = state.axes.get(&axis).copied().unwrap_or_default();
                         let dir = if value < -AXIS_ON {
                             GamepadAxisDirection::Negative
                         } else if value > AXIS_ON {
@@ -792,7 +827,7 @@ impl Application for App {
                         } else {
                             last_dir
                         };
-                        self.gamepad_axes.insert(axis, dir);
+                        state.axes.insert(axis, dir);
 
                         // Emulate a mouse on right axis movement
                         const MOUSE_DEADZONE: f32 = 0.15;
@@ -818,27 +853,27 @@ impl Application for App {
                             },
                             Axis::RightStickX => {
                                 if value < -MOUSE_DEADZONE {
-                                    self.gamepad_mouse.dx = Some(value + MOUSE_DEADZONE);
+                                    state.mouse.dx = Some(value + MOUSE_DEADZONE);
                                 } else if value > MOUSE_DEADZONE {
-                                    self.gamepad_mouse.dx = Some(value - MOUSE_DEADZONE);
+                                    state.mouse.dx = Some(value - MOUSE_DEADZONE);
                                 } else {
-                                    self.gamepad_mouse.dx = None;
+                                    state.mouse.dx = None;
                                 }
                             }
                             Axis::RightStickY => {
                                 if value < -MOUSE_DEADZONE {
-                                    self.gamepad_mouse.dy = Some(value + MOUSE_DEADZONE);
+                                    state.mouse.dy = Some(value + MOUSE_DEADZONE);
                                 } else if value > MOUSE_DEADZONE {
-                                    self.gamepad_mouse.dy = Some(value - MOUSE_DEADZONE);
+                                    state.mouse.dy = Some(value - MOUSE_DEADZONE);
                                 } else {
-                                    self.gamepad_mouse.dy = None;
+                                    state.mouse.dy = None;
                                 }
                             }
                             _ => {}
                         }
 
-                        if self.gamepad_mouse.dx.is_none() && self.gamepad_mouse.dy.is_none() {
-                            self.gamepad_mouse.update = None;
+                        if state.mouse.dx.is_none() && state.mouse.dy.is_none() {
+                            state.mouse.update = None;
                         }
                     }
                     EventType::ButtonPressed(button, _) | EventType::ButtonReleased(button, _) => {
@@ -879,9 +914,9 @@ impl Application for App {
                                     }
                                 }
                             }
-                            // Close on east button
+                            // Hide on east button
                             Button::East => {
-                                return self.update(Message::Quit);
+                                return self.update(Message::Hide);
                             }
                             // Left click on R1, right click on L1 (intentional), middle click on R3
                             Button::LeftTrigger | Button::RightTrigger | Button::RightThumb => {
@@ -1277,7 +1312,11 @@ impl Application for App {
                     },
                 )
             }),
-            if self.gamepad_mouse.dx.is_some() || self.gamepad_mouse.dy.is_some() {
+            if self
+                .gamepads
+                .values()
+                .any(|state| state.mouse.dx.is_some() || state.mouse.dy.is_some())
+            {
                 window::frames().map(|(_surface_id, instant)| Message::Frame(instant))
             } else {
                 Subscription::none()
