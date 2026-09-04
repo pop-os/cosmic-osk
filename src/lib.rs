@@ -209,7 +209,8 @@ impl App {
     }
 
     pub fn show(&mut self) -> Task<Message> {
-        if self.surface_id.is_some() {
+        // Without layouts the surface would be created with height 0
+        if self.surface_id.is_some() || self.layouts.is_none() {
             return Task::none();
         }
 
