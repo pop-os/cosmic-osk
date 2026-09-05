@@ -96,7 +96,7 @@ impl KeyLevel {
             "dead_abovecomma" => "\u{25CC}\u{0313}",
             "dead_abovereversedcomma" => "\u{25CC}\u{0314}",
             "dead_doublegrave" => "\u{25CC}\u{030F}",
-            "dead_belowring" => "\u{25CC}\u{0326}",
+            "dead_belowring" => "\u{25CC}\u{0325}",
             "dead_belowmacron" => "\u{25CC}\u{0331}",
             "dead_belowcircumflex" => "\u{25CC}\u{032D}",
             "dead_belowtilde" => "\u{25CC}\u{0330}",
