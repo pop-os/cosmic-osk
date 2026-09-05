@@ -34,6 +34,7 @@ use std::{
     process,
     time::Instant,
 };
+use unicode_width::UnicodeWidthStr;
 use xkbcommon::xkb;
 
 use config::{CONFIG_VERSION, Config};
@@ -1202,11 +1203,7 @@ impl Application for App {
                     } else {
                         button_row = button_row.push(
                             widget::Text::new(&key_level.name)
-                                .size(if key_level.name.chars().count() <= 1 {
-                                    18
-                                } else {
-                                    16
-                                })
+                                .size(if key_level.name.width() <= 1 { 18 } else { 16 })
                                 .font(if selected {
                                     cosmic::font::semibold()
                                 } else {

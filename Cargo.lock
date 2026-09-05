@@ -1029,6 +1029,7 @@ dependencies = [
  "serde",
  "tempfile",
  "tokio",
+ "unicode-width",
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-misc",
