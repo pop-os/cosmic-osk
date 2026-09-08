@@ -15,7 +15,7 @@ use cosmic::{
                 commands::blur::blur,
                 wayland::commands::layer_surface::{
                     Anchor, KeyboardInteractivity, Layer, destroy_layer_surface, get_layer_surface,
-                    set_input_zone,
+                    set_input_zone, set_show_on_lock,
                 },
             },
         },
@@ -274,7 +274,7 @@ impl App {
         }
 
         log::info!("get_layer_surface");
-        get_layer_surface(settings)
+        get_layer_surface(settings).chain(set_show_on_lock(surface_id, true))
     }
 
     pub fn key_level<'a>(&'a self, key: &'a layout::Key) -> &'a layout::KeyLevel {
