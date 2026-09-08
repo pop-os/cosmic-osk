@@ -54,17 +54,16 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     localize::localize();
 
-    let (config_handler, config) = match cosmic_config::Config::new(App::APP_ID, CONFIG_VERSION) {
+    let config = match cosmic_config::Config::new(App::APP_ID, CONFIG_VERSION) {
         Ok(config_handler) => {
-            let config = Config::get_entry(&config_handler).unwrap_or_else(|(errs, config)| {
+            Config::get_entry(&config_handler).unwrap_or_else(|(errs, config)| {
                 log::info!("errors loading config: {:?}", errs);
                 config
-            });
-            (Some(config_handler), config)
+            })
         }
         Err(err) => {
             log::error!("failed to create config handler: {}", err);
-            (None, Config::default())
+            Config::default()
         }
     };
 
@@ -74,19 +73,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     settings = settings.transparent(true);
     settings = settings.no_main_window(true);
 
-    let flags = Flags {
-        config_handler,
-        config,
-    };
-    cosmic::app::run::<App>(settings, flags)?;
+    cosmic::app::run::<App>(settings, ())?;
 
     Ok(())
-}
-
-#[derive(Clone, Debug)]
-pub struct Flags {
-    config_handler: Option<cosmic_config::Config>,
-    config: Config,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -183,8 +172,6 @@ impl DragState {
 
 pub struct App {
     core: Core,
-    config_handler: Option<cosmic_config::Config>,
-    config: Config,
     docked: bool,
     drag: DragState,
     focus: Option<widget::Id>,
@@ -343,56 +330,56 @@ impl App {
         };
 
         let mut focus = None;
-        if let Some(layout) = self.layout() {
-            if let Some(row) = layout.rows.get(index.0) {
-                match dir {
-                    FocusDirection::Left => {
-                        if index.1 == 0 {
-                            index.1 = row.len();
-                        }
-                        index.1 = index.1.saturating_sub(1);
+        if let Some(layout) = self.layout()
+            && let Some(row) = layout.rows.get(index.0)
+        {
+            match dir {
+                FocusDirection::Left => {
+                    if index.1 == 0 {
+                        index.1 = row.len();
                     }
-                    FocusDirection::Right => {
-                        index.1 = index.1.saturating_add(1);
-                        if index.1 >= row.len() {
-                            index.1 = 0;
-                        }
+                    index.1 = index.1.saturating_sub(1);
+                }
+                FocusDirection::Right => {
+                    index.1 = index.1.saturating_add(1);
+                    if index.1 >= row.len() {
+                        index.1 = 0;
                     }
-                    FocusDirection::Up | FocusDirection::Down => {
-                        let row_i = if matches!(dir, FocusDirection::Up) {
-                            index.0.saturating_sub(1)
-                        } else {
-                            index.0.saturating_add(1)
-                        };
-                        if let Some(next_row) = layout.rows.get(row_i) {
-                            let mut max_col_i = None;
-                            let mut max_overlap = 0.0;
-                            let mut x = 0.0;
-                            for (col_i, key) in next_row.iter().enumerate() {
-                                let next_x = x + key.width;
-                                let max_left = x.max(rect.x);
-                                let min_right = next_x.min(rect.x + rect.width);
-                                let overlap = (min_right - max_left).max(0.0);
-                                if overlap > max_overlap {
-                                    max_col_i = Some(col_i);
-                                    max_overlap = overlap;
-                                }
-                                x = next_x;
+                }
+                FocusDirection::Up | FocusDirection::Down => {
+                    let row_i = if matches!(dir, FocusDirection::Up) {
+                        index.0.saturating_sub(1)
+                    } else {
+                        index.0.saturating_add(1)
+                    };
+                    if let Some(next_row) = layout.rows.get(row_i) {
+                        let mut max_col_i = None;
+                        let mut max_overlap = 0.0;
+                        let mut x = 0.0;
+                        for (col_i, key) in next_row.iter().enumerate() {
+                            let next_x = x + key.width;
+                            let max_left = x.max(rect.x);
+                            let min_right = next_x.min(rect.x + rect.width);
+                            let overlap = (min_right - max_left).max(0.0);
+                            if overlap > max_overlap {
+                                max_col_i = Some(col_i);
+                                max_overlap = overlap;
                             }
-                            if let Some(col_i) = max_col_i {
-                                if let Some(key) = next_row.get(col_i) {
-                                    focus = Some(key.id.clone());
-                                }
-                            }
+                            x = next_x;
+                        }
+                        if let Some(col_i) = max_col_i
+                            && let Some(key) = next_row.get(col_i)
+                        {
+                            focus = Some(key.id.clone());
                         }
                     }
                 }
+            }
 
-                if focus.is_none() {
-                    if let Some(key) = row.get(index.1) {
-                        focus = Some(key.id.clone());
-                    }
-                }
+            if focus.is_none()
+                && let Some(key) = row.get(index.1)
+            {
+                focus = Some(key.id.clone());
             }
         }
 
@@ -423,7 +410,7 @@ impl Application for App {
     type Executor = executor::Default;
 
     /// Argument received [`cosmic::Application::new`].
-    type Flags = Flags;
+    type Flags = ();
 
     /// Message type specific to our [`App`].
     type Message = Message;
@@ -440,11 +427,9 @@ impl Application for App {
     }
 
     /// Creates the application, and optionally emits command on initialize.
-    fn init(core: Core, flags: Self::Flags) -> (Self, Task<Self::Message>) {
+    fn init(core: Core, _: Self::Flags) -> (Self, Task<Self::Message>) {
         let app = App {
             core,
-            config_handler: flags.config_handler,
-            config: flags.config,
             docked: true,
             drag: DragState::default(),
             focus: None,
@@ -599,7 +584,7 @@ impl Application for App {
                 keycode,
                 mut pressed,
             } => {
-                let Some(xkb_state) = &mut self.xkb_state else {
+                let Some(_xkb_state) = &mut self.xkb_state else {
                     return Task::none();
                 };
                 // TODO send key to reis
@@ -678,7 +663,7 @@ impl Application for App {
                     if self.surface_auto_pos {
                         // Automatically position at center bottom when first floated
                         self.surface_rect.x = (size.width - self.surface_rect.width) / 2.0;
-                        self.surface_rect.y = (size.height - self.surface_rect.height);
+                        self.surface_rect.y = size.height - self.surface_rect.height;
                         tasks.push(set_input_zone(surface_id, Some(vec![self.surface_rect])));
                     }
                     let t = cosmic::theme::active();
@@ -713,11 +698,10 @@ impl Application for App {
                         log::info!("{:?}", evt);
 
                         evt.seat.bind_capabilities(
-                            (DeviceCapability::Keyboard
+                            DeviceCapability::Keyboard
                                 | DeviceCapability::Button
                                 | DeviceCapability::Pointer
-                                | DeviceCapability::Scroll)
-                                .into(),
+                                | DeviceCapability::Scroll,
                         );
                         let _ = self.ei_conn.as_ref().unwrap().flush();
                     }
@@ -808,10 +792,7 @@ impl Application for App {
                 }
             }
             Message::Gilrs(event) => {
-                let state = self
-                    .gamepads
-                    .entry(event.id)
-                    .or_insert_with(|| GamepadState::default());
+                let state = self.gamepads.entry(event.id).or_default();
 
                 match event.event {
                     EventType::ButtonPressed(button, _) => {
@@ -938,15 +919,15 @@ impl Application for App {
                             }
                             // Press current focused button on south button
                             Button::South => {
-                                if let Some((_, _, key)) = self.find_focus() {
-                                    if let Some(keycode) = key.keycode {
-                                        let key_level = self.key_level(&key);
-                                        return self.update(Message::Key {
-                                            kind: key_level.kind,
-                                            keycode,
-                                            pressed,
-                                        });
-                                    }
+                                if let Some((_, _, key)) = self.find_focus()
+                                    && let Some(keycode) = key.keycode
+                                {
+                                    let key_level = self.key_level(&key);
+                                    return self.update(Message::Key {
+                                        kind: key_level.kind,
+                                        keycode,
+                                        pressed,
+                                    });
                                 }
                             }
                             // Hide on east button
@@ -1004,15 +985,15 @@ impl Application for App {
                                 if let Some(layout) = self.layout() {
                                     for row in layout.rows.iter() {
                                         for key in row.iter() {
-                                            if key.gamepad_mapping == Some(button) {
-                                                if let Some(keycode) = key.keycode {
-                                                    return self.update(Message::Key {
-                                                        // Use normal type to avoid sticky modifiers
-                                                        kind: layout::KeyKind::Normal,
-                                                        keycode,
-                                                        pressed,
-                                                    });
-                                                }
+                                            if key.gamepad_mapping == Some(button)
+                                                && let Some(keycode) = key.keycode
+                                            {
+                                                return self.update(Message::Key {
+                                                    // Use normal type to avoid sticky modifiers
+                                                    kind: layout::KeyKind::Normal,
+                                                    keycode,
+                                                    pressed,
+                                                });
                                             }
                                         }
                                     }
@@ -1028,11 +1009,11 @@ impl Application for App {
         Task::none()
     }
 
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Element<'_, Message> {
         unimplemented!()
     }
 
-    fn view_window(&self, id: window::Id) -> Element<Message> {
+    fn view_window(&self, _id: window::Id) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_s,
             space_xs,
@@ -1078,7 +1059,7 @@ impl Application for App {
                 let mut r = widget::row::with_capacity(layout_row.len() + 2);
                 r = r.push(widget::space().width(Length::Fill));
                 for key in layout_row.iter() {
-                    let key_level = self.key_level(&key);
+                    let key_level = self.key_level(key);
 
                     let mut pressed = false;
                     let mut selected = false;
@@ -1089,11 +1070,10 @@ impl Application for App {
                                     selected = true;
                                 }
                             } else {
-                                if let Some(xkb_state) = &self.xkb_state {
-                                    if xkb_state.mod_name_is_active(name, xkb::STATE_MODS_EFFECTIVE)
-                                    {
-                                        selected = true;
-                                    }
+                                if let Some(xkb_state) = &self.xkb_state
+                                    && xkb_state.mod_name_is_active(name, xkb::STATE_MODS_EFFECTIVE)
+                                {
+                                    selected = true;
                                 }
                             }
                         }
@@ -1246,7 +1226,7 @@ impl Application for App {
             }
             grid.into()
         } else {
-            widget::text(format!("missing layout")).into()
+            widget::text("missing layout".to_string()).into()
         };
         let container = widget::container(element)
             .center(Length::Fill)

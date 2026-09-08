@@ -1,5 +1,5 @@
 fn main() {
-    use gilrs::{Button, Event, Gilrs};
+    use gilrs::{Event, Gilrs};
 
     let mut gilrs = Gilrs::new().unwrap();
 

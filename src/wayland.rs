@@ -40,7 +40,7 @@ pub fn wayland_task(msg_tx: futures::channel::mpsc::Sender<Message>) {
         seats: HashMap::new(),
         imm: None,
     };
-    while let Ok(_) = event_loop.dispatch(None, &mut state) {}
+    while event_loop.dispatch(None, &mut state).is_ok() {}
 }
 
 struct Seat {
@@ -94,7 +94,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
 impl Dispatch<WlSeat, u32> for State {
     fn event(
         state: &mut Self,
-        wl_seat: &WlSeat,
+        _wl_seat: &WlSeat,
         event: <WlSeat as Proxy>::Event,
         &seat_id: &u32,
         _: &Connection,
@@ -102,28 +102,25 @@ impl Dispatch<WlSeat, u32> for State {
     ) {
         use wl_seat::Event;
         log::info!("Seat {seat_id} event: {event:?}");
-        match event {
-            Event::Capabilities { capabilities } => {
-                let WEnum::Value(caps) = capabilities else {
-                    log::info!("invalid seat {seat_id} capabilities {capabilities:?}");
+        if let Event::Capabilities { capabilities } = event {
+            let WEnum::Value(caps) = capabilities else {
+                log::info!("invalid seat {seat_id} capabilities {capabilities:?}");
+                return;
+            };
+            if caps.contains(wl_seat::Capability::Keyboard) {
+                log::info!("Seat {seat_id} keyboard");
+                let Some(seat) = state.seats.get_mut(&seat_id) else {
+                    log::info!("failed to find seat {seat_id}");
                     return;
                 };
-                if caps.contains(wl_seat::Capability::Keyboard) {
-                    log::info!("Seat {seat_id} keyboard");
-                    let Some(seat) = state.seats.get_mut(&seat_id) else {
-                        log::info!("failed to find seat {seat_id}");
-                        return;
-                    };
 
-                    if let Some(ref imm) = state.imm {
-                        seat.im
-                            .get_or_insert_with(|| imm.get_input_method(&seat.wl, qh, seat_id));
-                    } else {
-                        log::info!("no input method manager found");
-                    }
+                if let Some(ref imm) = state.imm {
+                    seat.im
+                        .get_or_insert_with(|| imm.get_input_method(&seat.wl, qh, seat_id));
+                } else {
+                    log::info!("no input method manager found");
                 }
             }
-            _ => {}
         }
     }
 }
@@ -131,11 +128,11 @@ impl Dispatch<WlSeat, u32> for State {
 impl Dispatch<ZwpInputMethodV2, u32> for State {
     fn event(
         state: &mut Self,
-        im: &ZwpInputMethodV2,
+        _im: &ZwpInputMethodV2,
         event: zwp_input_method_v2::Event,
         &seat_id: &u32,
         _: &Connection,
-        qh: &QueueHandle<Self>,
+        _qh: &QueueHandle<Self>,
     ) {
         use zwp_input_method_v2::Event;
         let Some(seat) = state.seats.get_mut(&seat_id) else {

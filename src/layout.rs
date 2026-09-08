@@ -50,10 +50,10 @@ impl KeyLevel {
         let mut name = xkb::keysym_get_name(sym);
 
         // Prefer keysym char
-        if let Some(char) = sym.key_char() {
-            if !char.is_control() {
-                name = char.to_string();
-            }
+        if let Some(char) = sym.key_char()
+            && !char.is_control()
+        {
+            name = char.to_string();
         }
 
         // Translate some keysym names
@@ -217,30 +217,31 @@ pub struct Setup {
 
 impl Setup {
     pub fn key_rows(&self) -> Vec<Vec<&'static str>> {
-        let mut key_rows = Vec::new();
-        key_rows.push(vec![
-            "ESC", "FK01", "FK02", "FK03", "FK04", "FK05", "FK06", "FK07", "FK08", "FK09", "FK10",
-            "FK11", "FK12", "DELE", "HOME",
-        ]);
-        key_rows.push(vec![
-            "TLDE", "AE01", "AE02", "AE03", "AE04", "AE05", "AE06", "AE07", "AE08", "AE09", "AE10",
-            "AE11", "AE12", "BKSP", "PGUP",
-        ]);
-        key_rows.push(vec![
-            "TAB", "AD01", "AD02", "AD03", "AD04", "AD05", "AD06", "AD07", "AD08", "AD09", "AD10",
-            "AD11", "AD12", "BKSL", "PGDN",
-        ]);
-        key_rows.push(vec![
-            "CAPS", "AC01", "AC02", "AC03", "AC04", "AC05", "AC06", "AC07", "AC08", "AC09", "AC10",
-            "AC11", "RTRN", "END",
-        ]);
-        key_rows.push(vec![
-            "LFSH", "AB01", "AB02", "AB03", "AB04", "AB05", "AB06", "AB07", "AB08", "AB09", "AB10",
-            "RTSH", "UP", "INS",
-        ]);
-        key_rows.push(vec![
-            "LCTL", "LALT", "LWIN", "SPCE", "RALT", "RWIN", "RCTL", "LEFT", "DOWN", "RGHT",
-        ]);
+        let mut key_rows = vec![
+            vec![
+                "ESC", "FK01", "FK02", "FK03", "FK04", "FK05", "FK06", "FK07", "FK08", "FK09",
+                "FK10", "FK11", "FK12", "DELE", "HOME",
+            ],
+            vec![
+                "TLDE", "AE01", "AE02", "AE03", "AE04", "AE05", "AE06", "AE07", "AE08", "AE09",
+                "AE10", "AE11", "AE12", "BKSP", "PGUP",
+            ],
+            vec![
+                "TAB", "AD01", "AD02", "AD03", "AD04", "AD05", "AD06", "AD07", "AD08", "AD09",
+                "AD10", "AD11", "AD12", "BKSL", "PGDN",
+            ],
+            vec![
+                "CAPS", "AC01", "AC02", "AC03", "AC04", "AC05", "AC06", "AC07", "AC08", "AC09",
+                "AC10", "AC11", "RTRN", "END",
+            ],
+            vec![
+                "LFSH", "AB01", "AB02", "AB03", "AB04", "AB05", "AB06", "AB07", "AB08", "AB09",
+                "AB10", "RTSH", "UP", "INS",
+            ],
+            vec![
+                "LCTL", "LALT", "LWIN", "SPCE", "RALT", "RWIN", "RCTL", "LEFT", "DOWN", "RGHT",
+            ],
+        ];
         if self.numpad {
             //TODO: come up with a way to have multi-row keys for KPAD and KPEN
             key_rows[0].extend_from_slice(&["PRSC", "I173", "I172", "I171"]);
@@ -327,7 +328,7 @@ impl Layout {
                             }
 
                             let syms = keymap.key_get_syms_by_level(kc, layout, level as u32);
-                            if let Some(sym) = syms.get(0) {
+                            if let Some(sym) = syms.first() {
                                 key.levels[level] = KeyLevel::for_sym(*sym);
                             }
                         }
