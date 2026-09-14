@@ -277,6 +277,23 @@ impl App {
         get_layer_surface(settings).chain(set_show_on_lock(surface_id, true))
     }
 
+    pub fn gamepad_svg(&self, button: &gilrs::Button) -> Option<&'static str> {
+        match button {
+            gilrs::Button::East => Some(include_str!("../res/gamepad-east-symbolic.svg")),
+            gilrs::Button::North => Some(include_str!("../res/gamepad-north-symbolic.svg")),
+            gilrs::Button::West => Some(include_str!("../res/gamepad-west-symbolic.svg")),
+            gilrs::Button::LeftThumb => Some(include_str!("../res/gamepad-l3-symbolic.svg")),
+            gilrs::Button::LeftTrigger => Some(include_str!("../res/gamepad-l1-symbolic.svg")),
+            gilrs::Button::LeftTrigger2 => Some(include_str!("../res/gamepad-l2-symbolic.svg")),
+            gilrs::Button::RightThumb => Some(include_str!("../res/gamepad-r3-symbolic.svg")),
+            gilrs::Button::RightTrigger => Some(include_str!("../res/gamepad-r1-symbolic.svg")),
+            gilrs::Button::RightTrigger2 => Some(include_str!("../res/gamepad-r2-symbolic.svg")),
+            gilrs::Button::Select => Some(include_str!("../res/gamepad-select-symbolic.svg")),
+            gilrs::Button::Start => Some(include_str!("../res/gamepad-start-symbolic.svg")),
+            _ => None,
+        }
+    }
+
     pub fn key_level<'a>(&'a self, key: &'a layout::Key) -> &'a layout::KeyLevel {
         let mut level = 0;
         if let Some(keycode) = key.keycode
@@ -1034,49 +1051,18 @@ impl Application for App {
 
     fn view_window(&self, id: window::Id) -> Element<Message> {
         let cosmic_theme::Spacing {
+            space_l,
             space_s,
             space_xs,
             space_xxs,
+            space_xxxs,
             ..
         } = theme::spacing();
 
-        let element: Element<_> = if let Some(layout) = self.layout() {
-            let mut grid = widget::column::with_capacity(layout.rows.len() + 1);
-            grid = grid.push(widget::row::with_children(vec![
-                widget::button::icon(
-                    widget::icon::from_svg_bytes(include_bytes!(
-                        "../res/preferences-desktop-keyboard-symbolic.svg"
-                    ))
-                    .symbolic(true),
-                )
-                .into(),
-                widget::button::icon(widget::icon::from_name("view-more-symbolic")).into(),
-                widget::space().width(Length::Fill).into(),
-                if self.docked {
-                    widget::button::icon(
-                        widget::icon::from_svg_bytes(include_bytes!("../res/keyboard-undock.svg"))
-                            .symbolic(true),
-                    )
-                    .on_press(Message::Dock(false))
-                    .into()
-                } else {
-                    widget::button::icon(
-                        widget::icon::from_svg_bytes(include_bytes!("../res/keyboard-dock.svg"))
-                            .symbolic(true),
-                    )
-                    .on_press(Message::Dock(true))
-                    .into()
-                },
-                widget::button::icon(widget::icon::from_name("window-minimize-symbolic"))
-                    .on_press(Message::Hide)
-                    .into(),
-                widget::button::icon(widget::icon::from_name("window-close-symbolic"))
-                    .on_press(Message::Quit)
-                    .into(),
-            ]));
+        let grid: Element<_> = if let Some(layout) = self.layout() {
+            let mut grid = widget::column::with_capacity(layout.rows.len());
             for layout_row in layout.rows.iter() {
-                let mut r = widget::row::with_capacity(layout_row.len() + 2);
-                r = r.push(widget::space().width(Length::Fill));
+                let mut r = widget::row::with_capacity(layout_row.len());
                 for key in layout_row.iter() {
                     let key_level = self.key_level(&key);
 
@@ -1167,35 +1153,16 @@ impl Application for App {
 
                     if self.gamepad_shown
                         && let Some(button) = &key.gamepad_mapping
+                        && let Some(svg) = self.gamepad_svg(button)
                     {
-                        let svg_opt = match button {
-                            gilrs::Button::North => {
-                                Some(include_str!("../res/gamepad-north-symbolic.svg"))
-                            }
-                            gilrs::Button::West => {
-                                Some(include_str!("../res/gamepad-west-symbolic.svg"))
-                            }
-                            gilrs::Button::LeftTrigger2 => {
-                                Some(include_str!("../res/gamepad-left-trigger-symbolic.svg"))
-                            }
-                            gilrs::Button::RightTrigger2 => {
-                                Some(include_str!("../res/gamepad-right-trigger-symbolic.svg"))
-                            }
-                            gilrs::Button::LeftThumb => {
-                                Some(include_str!("../res/gamepad-left-stick-symbolic.svg"))
-                            }
-                            _ => None,
-                        };
-                        if let Some(svg) = svg_opt {
-                            button_row = button_row
-                                .push(
-                                    widget::icon(
-                                        widget::icon::from_svg_bytes(svg.as_bytes()).symbolic(true),
-                                    )
-                                    .size(24),
+                        button_row = button_row
+                            .push(
+                                widget::icon(
+                                    widget::icon::from_svg_bytes(svg.as_bytes()).symbolic(true),
                                 )
-                                .push(widget::space().width(space_xxs));
-                        }
+                                .size(24),
+                            )
+                            .push(widget::space().width(space_xxs));
                     }
 
                     if let Some(icon) = &key_level.icon {
@@ -1241,25 +1208,112 @@ impl Application for App {
                             .width(Length::Fixed(self.key_size as f32 * key.width)),
                     );
                 }
-                r = r.push(widget::space().width(Length::Fill));
                 grid = grid.push(r);
             }
             grid.into()
         } else {
             widget::text(format!("missing layout")).into()
         };
-        let container = widget::container(element)
+
+        let mut column = widget::column::with_capacity(2);
+        column = column.push(widget::row::with_children(vec![
+            widget::button::icon(
+                widget::icon::from_svg_bytes(include_bytes!(
+                    "../res/preferences-desktop-keyboard-symbolic.svg"
+                ))
+                .symbolic(true),
+            )
+            .into(),
+            widget::button::icon(widget::icon::from_name("view-more-symbolic")).into(),
+            widget::space().width(Length::Fill).into(),
+            if self.docked {
+                widget::button::icon(
+                    widget::icon::from_svg_bytes(include_bytes!("../res/keyboard-undock.svg"))
+                        .symbolic(true),
+                )
+                .on_press(Message::Dock(false))
+                .into()
+            } else {
+                widget::button::icon(
+                    widget::icon::from_svg_bytes(include_bytes!("../res/keyboard-dock.svg"))
+                        .symbolic(true),
+                )
+                .on_press(Message::Dock(true))
+                .into()
+            },
+            widget::button::icon(widget::icon::from_name("window-minimize-symbolic"))
+                .on_press(Message::Hide)
+                .into(),
+            widget::button::icon(widget::icon::from_name("window-close-symbolic"))
+                .on_press(Message::Quit)
+                .into(),
+        ]));
+
+        let surface_rect = if self.drag.dragging {
+            self.drag.surface_rect
+        } else {
+            self.surface_rect
+        };
+        if self.gamepad_shown && self.docked {
+            //TODO: do not duplicate mappings here
+            let hints = [
+                (
+                    Some(gilrs::Button::Select),
+                    gilrs::Button::Start,
+                    fl!("open-keyboard"),
+                ),
+                (None, gilrs::Button::Select, fl!("float-keyboard")),
+                (None, gilrs::Button::East, fl!("close-keyboard")),
+                (None, gilrs::Button::RightTrigger, fl!("left-click")),
+                (None, gilrs::Button::LeftTrigger, fl!("right-click")),
+                //TODO: toggle based on current mode?
+                (None, gilrs::Button::RightThumb, fl!("scroll")),
+            ];
+            let mut hints_col = widget::column::with_capacity(hints.len())
+                .padding([self.key_padding as u16, 0, 0, space_l])
+                .spacing(space_s);
+            for (pre_button, button, text) in hints {
+                let mut hints_row = widget::row::with_capacity(4)
+                    .align_y(Alignment::Center)
+                    .spacing(space_xxxs);
+                let hint_svg = |b| -> Element<_> {
+                    if let Some(svg) = self.gamepad_svg(b) {
+                        widget::icon(widget::icon::from_svg_bytes(svg.as_bytes()).symbolic(true))
+                            .size(16)
+                            .into()
+                    } else {
+                        widget::space().width(16).into()
+                    }
+                };
+                if let Some(pre_button) = &pre_button {
+                    hints_row = hints_row
+                        .push(hint_svg(pre_button))
+                        .push(widget::icon::from_name("list-add-symbolic").size(16))
+                        .push(hint_svg(&button))
+                        .push(widget::text::body(text));
+                } else {
+                    hints_row = hints_row
+                        .push(hint_svg(&button))
+                        .push(widget::text::body(text));
+                }
+                hints_col = hints_col.push(hints_row);
+            }
+            column = column.push(widget::row::with_children(vec![
+                widget::space().width(Length::Fill).into(),
+                grid.into(),
+                hints_col.width(Length::Fill).into(),
+            ]));
+        } else {
+            column = column.push(widget::container(grid).center(Length::Fill));
+        }
+
+        let container = widget::container(column)
             .center(Length::Fill)
             .class(theme::Container::Background)
             .padding([space_xxs, space_s, space_xs, space_s]);
         if self.docked {
             container.into()
         } else {
-            let surface_rect = if self.drag.dragging {
-                self.drag.surface_rect
-            } else {
-                self.surface_rect
-            };
             widget::container(
                 container
                     .width(surface_rect.width)
