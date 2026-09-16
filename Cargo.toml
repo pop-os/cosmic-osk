@@ -6,10 +6,10 @@ edition = "2024"
 [dependencies]
 calloop = "0.14"
 calloop-wayland-source = "0.4"
+cosmic-osk-config = { path = "config" }
 env_logger = "0.11"
 gilrs = "0.11"
 log = "0.4"
-serde = { version = "1", features = ["serde_derive"] }
 tokio = { version = "1", features = ["rt"] }
 unicode-width = "0.2"
 wayland-client = "0.31"
@@ -34,8 +34,12 @@ tempfile = "3"
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic"
 default-features = false
-features = ["multi-window", "tokio", "wayland", "winit"]
+features = ["multi-window", "single-instance", "tokio", "wayland", "winit"]
 
 [features]
 default = ["wgpu"]
 wgpu = ["libcosmic/wgpu"]
+
+[workspace]
+resolver = "3"
+members = ["config"]

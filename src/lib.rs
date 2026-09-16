@@ -2,9 +2,9 @@
 
 use cosmic::{
     Application, Element,
-    app::{Core, Settings, Task},
+    app::{Core, CosmicFlags, Settings, Task},
     cosmic_config::{self, CosmicConfigEntry},
-    cosmic_theme, executor,
+    cosmic_theme, dbus_activation, executor,
     iced::{
         Alignment, Length, Limits, Point, Rectangle, Size, Subscription, Vector, event,
         futures::{self, SinkExt},
@@ -27,18 +27,16 @@ use cosmic::{
     surface::corner_radius::rounded_rect_strips,
     theme, widget,
 };
+use cosmic_osk_config::{AppTheme, Config};
 use reis::ei::keyboard::KeyState;
 use std::{
     any::TypeId,
     collections::{HashMap, HashSet},
-    process,
-    time::Instant,
+    env,
+    time::{Duration, Instant},
 };
 use unicode_width::UnicodeWidthStr;
 use xkbcommon::xkb;
-
-use config::{CONFIG_VERSION, Config};
-pub mod config;
 
 mod ei;
 
@@ -49,12 +47,28 @@ pub mod localize;
 
 pub mod wayland;
 
+fn config_theme(config: &Config) -> theme::Theme {
+    match config.app_theme {
+        AppTheme::Dark => {
+            let mut t = theme::system_dark();
+            t.theme_type.prefer_dark(Some(true));
+            t
+        }
+        AppTheme::Light => {
+            let mut t = theme::system_light();
+            t.theme_type.prefer_dark(Some(false));
+            t
+        }
+        AppTheme::System => theme::system_preference(),
+    }
+}
+
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
     localize::localize();
 
-    let (config_handler, config) = match cosmic_config::Config::new(App::APP_ID, CONFIG_VERSION) {
+    let (config_handler, config) = match cosmic_config::Config::new(Config::ID, Config::VERSION) {
         Ok(config_handler) => {
             let config = Config::get_entry(&config_handler).unwrap_or_else(|(errs, config)| {
                 log::info!("errors loading config: {:?}", errs);
@@ -69,7 +83,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut settings = Settings::default();
-    settings = settings.theme(config.app_theme.theme());
+    settings = settings.theme(config_theme(&config));
     settings = settings.exit_on_close(false);
     settings = settings.transparent(true);
     settings = settings.no_main_window(true);
@@ -77,16 +91,44 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let flags = Flags {
         config_handler,
         config,
+        subcommand_opt: env::args().nth(1),
     };
-    cosmic::app::run::<App>(settings, flags)?;
+    cosmic::app::run_single_instance::<App>(settings, flags)?;
 
     Ok(())
+}
+
+#[derive(Default)]
+pub struct DragState {
+    dragging: bool,
+    finger: Option<Finger>,
+    start_pos: Option<Point>,
+    mouse_pos: Option<Point>,
+    surface_rect: Rectangle,
+}
+
+impl DragState {
+    fn vector(&self) -> Option<Vector> {
+        let start_pos = self.start_pos?;
+        let mouse_pos = self.mouse_pos?;
+        Some(mouse_pos - start_pos)
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct Flags {
     config_handler: Option<cosmic_config::Config>,
     config: Config,
+    subcommand_opt: Option<String>,
+}
+
+impl CosmicFlags for Flags {
+    type SubCommand = String;
+    type Args = Vec<String>;
+
+    fn action(&self) -> Option<&String> {
+        self.subcommand_opt.as_ref()
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -139,9 +181,17 @@ pub struct GamepadState {
     pub mouse: GamepadMouse,
 }
 
+#[derive(Copy, Clone, Debug, Hash)]
+pub struct ImeTimeout {
+    pub seat_id: u32,
+    pub active: bool,
+    pub instant: Instant,
+}
+
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum Message {
+    Config(Config),
     Dock(bool),
     DragStart(Option<Finger>),
     DragMove(Option<Finger>, Point),
@@ -154,8 +204,11 @@ pub enum Message {
         keycode: layout::KeyCode,
         pressed: bool,
     },
-    Quit,
     SeatImActive {
+        seat_id: u32,
+        active: bool,
+    },
+    SeatImActiveTimeout {
         seat_id: u32,
         active: bool,
     },
@@ -164,21 +217,16 @@ pub enum Message {
     Gilrs(gilrs::Event),
 }
 
-#[derive(Default)]
-pub struct DragState {
-    dragging: bool,
-    finger: Option<Finger>,
-    start_pos: Option<Point>,
-    mouse_pos: Option<Point>,
-    surface_rect: Rectangle,
-}
-
-impl DragState {
-    fn vector(&self) -> Option<Vector> {
-        let start_pos = self.start_pos?;
-        let mouse_pos = self.mouse_pos?;
-        Some(mouse_pos - start_pos)
-    }
+#[derive(Clone, Copy, Debug)]
+pub enum ShowReason {
+    /// Always show setting
+    AlwaysShow,
+    /// Shown manually (command line, gamepad shortcut, or another source)
+    Manual,
+    /// Shown because of IME activation
+    Ime,
+    /// Not shown
+    None,
 }
 
 pub struct App {
@@ -188,13 +236,14 @@ pub struct App {
     docked: bool,
     drag: DragState,
     focus: Option<widget::Id>,
-    ignore_activate: bool,
+    ime_timeout: Option<ImeTimeout>,
     key_padding: usize,
     key_size: usize,
     layouts: Option<Vec<Layout>>,
     group: u32,
     pressed: HashMap<layout::KeyCode, layout::KeyKind>,
     sticky: HashSet<layout::KeyCode>,
+    show_reason: ShowReason,
     size: Size,
     surface_auto_pos: bool,
     surface_id: Option<window::Id>,
@@ -211,7 +260,29 @@ pub struct App {
 }
 
 impl App {
-    pub fn hide(&mut self) -> Task<Message> {
+    pub fn update_config(&mut self) -> Task<Message> {
+        let mut tasks = Vec::with_capacity(2);
+        tasks.push(cosmic::command::set_theme(config_theme(&self.config)));
+        if self.config.always_shown {
+            tasks.push(self.show(ShowReason::AlwaysShow));
+        } else if matches!(self.show_reason, ShowReason::AlwaysShow) {
+            tasks.push(self.hide(false));
+        }
+        Task::batch(tasks)
+    }
+
+    pub fn hide(&mut self, force_hide: bool) -> Task<Message> {
+        if self.config.always_shown && force_hide {
+            if let Some(config_handler) = &self.config_handler {
+                if let Err(err) = self.config.set_always_shown(config_handler, false) {
+                    log::warn!("failed to set always_shown: {}", err);
+                }
+            } else {
+                log::warn!("failed to set always_shown: no config handler");
+            }
+        }
+
+        self.release_all();
         if let Some(surface_id) = self.surface_id.take() {
             destroy_layer_surface(surface_id)
         } else {
@@ -219,11 +290,13 @@ impl App {
         }
     }
 
-    pub fn show(&mut self) -> Task<Message> {
+    pub fn show(&mut self, reason: ShowReason) -> Task<Message> {
         // Without layouts the surface would be created with height 0
         if self.surface_id.is_some() || self.layouts.is_none() {
             return Task::none();
         }
+
+        self.show_reason = reason;
 
         self.surface_rect.width = 0.0;
         self.surface_rect.height = 0.0;
@@ -465,13 +538,14 @@ impl Application for App {
             docked: true,
             drag: DragState::default(),
             focus: None,
-            ignore_activate: false,
+            ime_timeout: None,
             key_padding: 4,
             key_size: 64,
             layouts: None,
             group: 0,
             pressed: HashMap::new(),
             sticky: HashSet::new(),
+            show_reason: ShowReason::None,
             size: Size::default(),
             surface_auto_pos: true,
             surface_id: None,
@@ -489,14 +563,37 @@ impl Application for App {
         (app, Task::none())
     }
 
+    fn dbus_activation(&mut self, message: dbus_activation::Message) -> Task<Message> {
+        match message.msg {
+            dbus_activation::Details::ActivateAction { action, .. } => match action.as_str() {
+                "hide" => return self.hide(true),
+                "show" => return self.show(ShowReason::Manual),
+                _ => {
+                    log::warn!("unknown subcommand {:?}", action);
+                }
+            },
+            _ => {
+                log::warn!("ignoring DBUS activation message {:?}", message)
+            }
+        }
+        Task::none()
+    }
+
+    fn dbus_connection(&mut self, conn: zbus::Connection) -> Task<Message> {
+        Task::stream(ei::stream(conn))
+    }
+
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Config(config) => {
+                self.config = config;
+                return self.update_config();
+            }
             Message::Dock(dock) => {
-                self.release_all();
                 if dock != self.docked {
-                    let hide_task = self.hide();
+                    let hide_task = self.hide(false);
                     self.docked = dock;
-                    let show_task = self.show();
+                    let show_task = self.show(self.show_reason);
                     return Task::batch([hide_task, show_task]);
                 }
             }
@@ -607,18 +704,13 @@ impl Application for App {
                 return widget::button::focus(id);
             }
             Message::Hide => {
-                self.release_all();
-                self.ignore_activate = true;
-                return self.hide();
+                return self.hide(true);
             }
             Message::Key {
                 kind,
                 keycode,
                 mut pressed,
             } => {
-                let Some(xkb_state) = &mut self.xkb_state else {
-                    return Task::none();
-                };
                 // TODO send key to reis
                 if let Some((device, keyboard)) = &self.ei_keyboard {
                     let release_mods = match kind {
@@ -672,17 +764,27 @@ impl Application for App {
                         .expect("failed to flush EI connection");
                 }
             }
-            Message::Quit => {
-                process::exit(0);
-            }
             Message::SeatImActive { seat_id, active } => {
                 log::info!("{} active: {}", seat_id, active);
-                if active {
-                    if !self.ignore_activate {
-                        return self.show();
-                    }
+
+                if self.config.ime_activation && self.surface_id.is_some() != active {
+                    //TODO: ideal timeout time?
+                    self.ime_timeout = Some(ImeTimeout {
+                        seat_id,
+                        active,
+                        instant: Instant::now() + Duration::from_millis(100),
+                    });
                 } else {
-                    self.ignore_activate = false;
+                    self.ime_timeout = None;
+                }
+            }
+            Message::SeatImActiveTimeout { seat_id, active } => {
+                log::info!("{} active timeout: {}", seat_id, active);
+                //TODO: use seat_id?
+                if active {
+                    return self.show(ShowReason::Ime);
+                } else if matches!(self.show_reason, ShowReason::Ime) && !self.config.always_shown {
+                    return self.hide(false);
                 }
             }
             Message::Size(size) => {
@@ -695,7 +797,7 @@ impl Application for App {
                     if self.surface_auto_pos {
                         // Automatically position at center bottom when first floated
                         self.surface_rect.x = (size.width - self.surface_rect.width) / 2.0;
-                        self.surface_rect.y = (size.height - self.surface_rect.height);
+                        self.surface_rect.y = size.height - self.surface_rect.height;
                         tasks.push(set_input_zone(surface_id, Some(vec![self.surface_rect])));
                     }
                     let t = cosmic::theme::active();
@@ -798,8 +900,10 @@ impl Application for App {
                             self.layouts = Some(layouts);
                             self.xkb_state = Some(xkb::State::new(&xkb_keymap));
 
-                            //TODO: destroy and recreate surface when layout changes?
-                            return self.show();
+                            if self.config.always_shown {
+                                //TODO: destroy and recreate surface when layout changes?
+                                return self.show(ShowReason::AlwaysShow);
+                            }
                         }
 
                         // This starts emulating if a non-keyboard device is found. The keyboard type does it above
@@ -843,11 +947,12 @@ impl Application for App {
                 // Only handle gamepad events if surface is visible
                 if self.surface_id.is_none() {
                     // Show on Start+Select gesture
-                    if state.buttons.contains(&Button::Start)
+                    if self.config.gamepad_shortcut
+                        && state.buttons.contains(&Button::Start)
                         && state.buttons.contains(&Button::Select)
                         && self.surface_id.is_none()
                     {
-                        return self.show();
+                        return self.show(ShowReason::Manual);
                     }
 
                     // Clear axes and mouse state
@@ -968,7 +1073,7 @@ impl Application for App {
                             }
                             // Hide on east button
                             Button::East => {
-                                return self.update(Message::Hide);
+                                return self.hide(true);
                             }
                             // Left click on R1, right click on L1 (intentional)
                             Button::LeftTrigger | Button::RightTrigger => {
@@ -1045,11 +1150,11 @@ impl Application for App {
         Task::none()
     }
 
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Element<'_, Message> {
         unimplemented!()
     }
 
-    fn view_window(&self, id: window::Id) -> Element<Message> {
+    fn view_window(&self, _id: window::Id) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_l,
             space_s,
@@ -1241,11 +1346,8 @@ impl Application for App {
                 .on_press(Message::Dock(true))
                 .into()
             },
-            widget::button::icon(widget::icon::from_name("window-minimize-symbolic"))
-                .on_press(Message::Hide)
-                .into(),
             widget::button::icon(widget::icon::from_name("window-close-symbolic"))
-                .on_press(Message::Quit)
+                .on_press(Message::Hide)
                 .into(),
         ]));
 
@@ -1326,6 +1428,7 @@ impl Application for App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
+        struct ConfigSubscription;
         struct WaylandSubscription;
         struct GilrsSubscription;
 
@@ -1367,6 +1470,17 @@ impl Application for App {
                 ) => Some(Message::Size(size)),
                 _ => None,
             }),
+            cosmic_config::config_subscription::<_, Config>(
+                TypeId::of::<ConfigSubscription>(),
+                Config::ID.into(),
+                Config::VERSION,
+            )
+            .map(|update| {
+                if !update.errors.is_empty() {
+                    log::warn!("config errors: {:?}", update.errors);
+                }
+                Message::Config(update.config)
+            }),
             Subscription::run_with(TypeId::of::<WaylandSubscription>(), |_| {
                 stream::channel(
                     128,
@@ -1377,7 +1491,6 @@ impl Application for App {
                     },
                 )
             }),
-            ei::subscription().map(Message::Ei),
             Subscription::run_with(TypeId::of::<GilrsSubscription>(), |_| {
                 stream::channel(
                     128,
@@ -1399,6 +1512,25 @@ impl Application for App {
                     },
                 )
             }),
+            if let Some(ime_timeout) = self.ime_timeout {
+                Subscription::run_with(ime_timeout, |&ime_timeout| {
+                    stream::channel(
+                        1,
+                        move |mut output: futures::channel::mpsc::Sender<Message>| async move {
+                            tokio::time::sleep_until(ime_timeout.instant.into()).await;
+                            output
+                                .send(Message::SeatImActiveTimeout {
+                                    seat_id: ime_timeout.seat_id,
+                                    active: ime_timeout.active,
+                                })
+                                .await
+                                .unwrap();
+                        },
+                    )
+                })
+            } else {
+                Subscription::none()
+            },
             if self
                 .gamepads
                 .values()

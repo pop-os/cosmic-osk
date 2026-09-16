@@ -1028,6 +1028,7 @@ dependencies = [
  "ashpd 0.13.13",
  "calloop",
  "calloop-wayland-source",
+ "cosmic-osk-config",
  "enumflags2",
  "env_logger",
  "gilrs",
@@ -1039,7 +1040,6 @@ dependencies = [
  "log",
  "reis",
  "rust-embed",
- "serde",
  "tempfile",
  "tokio",
  "unicode-width",
@@ -1048,6 +1048,14 @@ dependencies = [
  "wayland-protocols-misc",
  "xkbcommon 0.9.0",
  "zbus",
+]
+
+[[package]]
+name = "cosmic-osk-config"
+version = "0.1.0"
+dependencies = [
+ "cosmic-config",
+ "serde",
 ]
 
 [[package]]
@@ -3135,6 +3143,7 @@ dependencies = [
  "palette",
  "phf",
  "rfd",
+ "ron",
  "roxmltree",
  "rust-embed",
  "serde",

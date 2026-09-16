@@ -94,7 +94,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
 impl Dispatch<WlSeat, u32> for State {
     fn event(
         state: &mut Self,
-        wl_seat: &WlSeat,
+        _: &WlSeat,
         event: <WlSeat as Proxy>::Event,
         &seat_id: &u32,
         _: &Connection,
@@ -131,11 +131,11 @@ impl Dispatch<WlSeat, u32> for State {
 impl Dispatch<ZwpInputMethodV2, u32> for State {
     fn event(
         state: &mut Self,
-        im: &ZwpInputMethodV2,
+        _: &ZwpInputMethodV2,
         event: zwp_input_method_v2::Event,
         &seat_id: &u32,
         _: &Connection,
-        qh: &QueueHandle<Self>,
+        _: &QueueHandle<Self>,
     ) {
         use zwp_input_method_v2::Event;
         let Some(seat) = state.seats.get_mut(&seat_id) else {

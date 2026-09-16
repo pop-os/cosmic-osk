@@ -6,10 +6,13 @@ use ashpd::desktop::{
         ConnectToEISOptions, DeviceType, RemoteDesktop, SelectDevicesOptions, StartOptions,
     },
 };
+use cosmic::action::{self, Action};
 use cosmic::iced::futures::{self, FutureExt, StreamExt};
 use enumflags2::BitFlags;
 use reis::ei;
 use std::os::{fd::OwnedFd, unix::net::UnixStream};
+
+use crate::Message;
 
 const DEVICE_TYPE_KEYBOARD: u32 = 1;
 const DEVICE_TYPE_POINTER: u32 = 2;
@@ -32,42 +35,29 @@ pub enum Msg {
     Event(reis::event::EiEvent),
 }
 
-pub fn subscription() -> cosmic::iced::Subscription<Msg> {
-    cosmic::iced::Subscription::run(ei_stream)
-}
-
-fn ei_stream() -> impl futures::stream::Stream<Item = Msg> + Send {
+pub fn stream(
+    zbus: zbus::Connection,
+) -> impl futures::stream::Stream<Item = Action<Message>> + Send {
     async {
-        let conn = open_connection().await;
+        let conn = open_connection(zbus).await;
         // TODO Exit process on error or end of stream?
         let (connection, events) = conn
-            .handshake_tokio("cosmic-osd", ei::handshake::ContextType::Sender)
+            .handshake_tokio("cosmic-osk", ei::handshake::ContextType::Sender)
             .await
             .unwrap();
-        futures::stream::once(async move { Msg::Connection(connection) })
-            .chain(events.map(|x| Msg::Event(x.unwrap())))
+        futures::stream::once(async move { action::app(Message::Ei(Msg::Connection(connection))) })
+            .chain(events.map(|x| action::app(Message::Ei(Msg::Event(x.unwrap())))))
     }
     .flatten_stream()
 }
 
-async fn dbus_connection() -> zbus::Result<zbus::Connection> {
-    zbus::connection::Builder::session()?
-        .name("com.system76.CosmicOSK")?
-        .build()
-        .await
-}
-
-async fn open_connection() -> ei::Context {
+async fn open_connection(zbus: zbus::Connection) -> ei::Context {
     // If `LIBEI_SOCKET` env var is set, try to use that
     if let Some(context) = ei::Context::connect_to_env().unwrap() {
         context
     } else {
-        let conn = dbus_connection()
-            .await
-            .expect("connect to DBus session socket");
-
         // Connect to cosmic-comp using `com.system76.CosmicComp.Ei` directly
-        if let Ok(proxy) = EiProxy::new(&conn).await
+        if let Ok(proxy) = EiProxy::new(&zbus).await
             && let Ok(socket) = proxy
                 .get_sender_socket(DEVICE_TYPE_KEYBOARD | DEVICE_TYPE_POINTER)
                 .await
@@ -77,7 +67,7 @@ async fn open_connection() -> ei::Context {
         } else {
             // For other compositors, try portal
             eprintln!("Unable to find ei socket. Trying xdg desktop portal.");
-            let remote_desktop = RemoteDesktop::with_connection(conn).await.unwrap();
+            let remote_desktop = RemoteDesktop::with_connection(zbus).await.unwrap();
             let session = remote_desktop
                 .create_session(CreateSessionOptions::default())
                 .await

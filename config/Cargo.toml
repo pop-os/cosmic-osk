@@ -1,0 +1,12 @@
+[package]
+name = "cosmic-osk-config"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde = { version = "1", features = ["serde_derive"] }
+
+[dependencies.cosmic-config]
+git = "https://github.com/pop-os/libcosmic"
+default-features = false
+features = ["macro"]
