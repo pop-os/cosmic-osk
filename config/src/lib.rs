@@ -27,7 +27,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub const ID: &'static str = "com.system76.CosmicOSK_TODO";
+    pub const ID: &'static str = "com.system76.CosmicOSK";
     pub const VERSION: u64 = 1;
 
     pub fn handler() -> Result<cosmic_config::Config, cosmic_config::Error> {
