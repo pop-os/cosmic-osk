@@ -25,7 +25,11 @@ use cosmic::{
         window,
     },
     surface::corner_radius::rounded_rect_strips,
-    theme, widget,
+    theme,
+    widget::{
+        self,
+        menu::{KeyBind, action::MenuAction},
+    },
 };
 use cosmic_osk_config::{AppTheme, Config};
 use reis::ei::keyboard::KeyState;
@@ -41,11 +45,13 @@ use xkbcommon::xkb;
 mod ei;
 
 use layout::Layout;
-pub mod layout;
+mod layout;
 
 pub mod localize;
 
-pub mod wayland;
+mod menu;
+
+mod wayland;
 
 fn config_theme(config: &Config) -> theme::Theme {
     match config.app_theme {
@@ -96,6 +102,21 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     cosmic::app::run_single_instance::<App>(settings, flags)?;
 
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Action {
+    None,
+}
+
+impl MenuAction for Action {
+    type Message = Message;
+
+    fn message(&self) -> Message {
+        match self {
+            Self::None => Message::None,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -191,6 +212,7 @@ pub struct ImeTimeout {
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum Message {
+    None,
     Config(Config),
     Dock(bool),
     DragStart(Option<Finger>),
@@ -237,6 +259,7 @@ pub struct App {
     drag: DragState,
     focus: Option<widget::Id>,
     ime_timeout: Option<ImeTimeout>,
+    key_binds: HashMap<KeyBind, Action>,
     key_padding: usize,
     key_size: usize,
     layouts: Option<Vec<Layout>>,
@@ -539,6 +562,7 @@ impl Application for App {
             drag: DragState::default(),
             focus: None,
             ime_timeout: None,
+            key_binds: HashMap::new(),
             key_padding: 4,
             key_size: 64,
             layouts: None,
@@ -585,6 +609,7 @@ impl Application for App {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::None => {}
             Message::Config(config) => {
                 self.config = config;
                 return self.update_config();
@@ -1322,14 +1347,7 @@ impl Application for App {
 
         let mut column = widget::column::with_capacity(2);
         column = column.push(widget::row::with_children(vec![
-            widget::button::icon(
-                widget::icon::from_svg_bytes(include_bytes!(
-                    "../res/preferences-desktop-keyboard-symbolic.svg"
-                ))
-                .symbolic(true),
-            )
-            .into(),
-            widget::button::icon(widget::icon::from_name("view-more-symbolic")).into(),
+            menu::menu_bar(&self.core, &self.config, &self.key_binds).into(),
             widget::space().width(Length::Fill).into(),
             if self.docked {
                 widget::button::icon(
