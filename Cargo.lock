@@ -1023,8 +1023,10 @@ dependencies = [
  "i18n-embed-fl 0.9.4",
  "icu_collator",
  "icu_provider 1.5.0",
+ "libc",
  "libcosmic",
  "log",
+ "paste",
  "reis",
  "rust-embed",
  "tempfile",
@@ -1042,6 +1044,7 @@ name = "cosmic-osk-config"
 version = "0.1.0"
 dependencies = [
  "cosmic-config",
+ "iced_futures",
  "serde",
 ]
 

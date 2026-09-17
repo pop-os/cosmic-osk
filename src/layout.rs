@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use cosmic::widget;
+use cosmic_osk_config::Config;
 use xkbcommon::xkb::{self, Keysym};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -208,50 +209,7 @@ pub struct Key {
     pub width: f32,
     pub keycode: Option<KeyCode>,
     pub gamepad_mapping: Option<gilrs::Button>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Setup {
-    pub numpad: bool,
-}
-
-impl Setup {
-    pub fn key_rows(&self) -> Vec<Vec<&'static str>> {
-        let mut key_rows = Vec::new();
-        key_rows.push(vec![
-            "ESC", "FK01", "FK02", "FK03", "FK04", "FK05", "FK06", "FK07", "FK08", "FK09", "FK10",
-            "FK11", "FK12", "DELE", "HOME",
-        ]);
-        key_rows.push(vec![
-            "TLDE", "AE01", "AE02", "AE03", "AE04", "AE05", "AE06", "AE07", "AE08", "AE09", "AE10",
-            "AE11", "AE12", "BKSP", "PGUP",
-        ]);
-        key_rows.push(vec![
-            "TAB", "AD01", "AD02", "AD03", "AD04", "AD05", "AD06", "AD07", "AD08", "AD09", "AD10",
-            "AD11", "AD12", "BKSL", "PGDN",
-        ]);
-        key_rows.push(vec![
-            "CAPS", "AC01", "AC02", "AC03", "AC04", "AC05", "AC06", "AC07", "AC08", "AC09", "AC10",
-            "AC11", "RTRN", "END",
-        ]);
-        key_rows.push(vec![
-            "LFSH", "AB01", "AB02", "AB03", "AB04", "AB05", "AB06", "AB07", "AB08", "AB09", "AB10",
-            "RTSH", "UP", "INS",
-        ]);
-        key_rows.push(vec![
-            "LCTL", "LALT", "LWIN", "SPCE", "RALT", "RWIN", "RCTL", "LEFT", "DOWN", "RGHT",
-        ]);
-        if self.numpad {
-            //TODO: come up with a way to have multi-row keys for KPAD and KPEN
-            key_rows[0].extend_from_slice(&["PRSC", "I173", "I172", "I171"]);
-            key_rows[1].extend_from_slice(&["NMLK", "KPDV", "KPMU", "KPSU"]);
-            key_rows[2].extend_from_slice(&["KP7", "KP8", "KP9", "KPAD"]);
-            key_rows[3].extend_from_slice(&["KP4", "KP5", "KP6", "KPAD"]);
-            key_rows[4].extend_from_slice(&["KP1", "KP2", "KP3", "KPEN"]);
-            key_rows[5].extend_from_slice(&["KP0", "KPDL", "KPEQ", "KPEN"]);
-        }
-        key_rows
-    }
+    pub spacer: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -260,46 +218,159 @@ pub struct Layout {
 }
 
 impl Layout {
-    pub fn all(keymap: &xkb::Keymap) -> Option<Vec<Self>> {
+    pub fn all(keymap: &xkb::Keymap, config: &Config) -> Option<Vec<Self>> {
         if keymap.num_layouts() == 0 {
             None
         } else {
             Some(
                 (0..keymap.num_layouts())
-                    .map(|layout| Self::new(keymap, layout))
+                    .map(|layout| Self::new(keymap, config, layout))
                     .collect(),
             )
         }
     }
 
-    fn new(keymap: &xkb::Keymap, layout: u32) -> Self {
+    fn key_rows(config: &Config) -> Vec<Vec<(&'static str, f32)>> {
+        macro_rules! k {
+            ($name:expr) => {
+                ($name, 1.0)
+            };
+            ($name:expr, $width:expr) => {
+                ($name, $width)
+            };
+        }
+
+        let mut key_rows = Vec::new();
+        if config.function_row {
+            key_rows.push(vec![
+                k!("ESC"),
+                k!("FK01"),
+                k!("FK02"),
+                k!("FK03"),
+                k!("FK04"),
+                k!("FK05"),
+                k!("FK06"),
+                k!("FK07"),
+                k!("FK08"),
+                k!("FK09"),
+                k!("FK10"),
+                k!("FK11"),
+                k!("FK12"),
+                k!("DELE", 2.0),
+            ]);
+        }
+        key_rows.push(vec![
+            k!("TLDE"),
+            k!("AE01"),
+            k!("AE02"),
+            k!("AE03"),
+            k!("AE04"),
+            k!("AE05"),
+            k!("AE06"),
+            k!("AE07"),
+            k!("AE08"),
+            k!("AE09"),
+            k!("AE10"),
+            k!("AE11"),
+            k!("AE12"),
+            k!("BKSP", 2.0),
+        ]);
+        key_rows.push(vec![
+            k!("TAB", 1.5),
+            k!("AD01"),
+            k!("AD02"),
+            k!("AD03"),
+            k!("AD04"),
+            k!("AD05"),
+            k!("AD06"),
+            k!("AD07"),
+            k!("AD08"),
+            k!("AD09"),
+            k!("AD10"),
+            k!("AD11"),
+            k!("AD12"),
+            k!("BKSL", 1.5),
+        ]);
+        key_rows.push(vec![
+            k!("CAPS", 1.75),
+            k!("AC01"),
+            k!("AC02"),
+            k!("AC03"),
+            k!("AC04"),
+            k!("AC05"),
+            k!("AC06"),
+            k!("AC07"),
+            k!("AC08"),
+            k!("AC09"),
+            k!("AC10"),
+            k!("AC11"),
+            k!("RTRN", 2.25),
+        ]);
+        key_rows.push(vec![
+            k!("LFSH", 2.25),
+            k!("AB01"),
+            k!("AB02"),
+            k!("AB03"),
+            k!("AB04"),
+            k!("AB05"),
+            k!("AB06"),
+            k!("AB07"),
+            k!("AB08"),
+            k!("AB09"),
+            k!("AB10"),
+            k!("RTSH", 1.75),
+            k!("UP"),
+        ]);
+        key_rows.push(vec![
+            k!("LCTL", 1.25),
+            k!("LWIN", 1.25),
+            k!("LALT", 1.25),
+            k!("SPCE", 5.5),
+            k!("RALT", 1.25),
+            k!("MENU", 1.25),
+            k!("RCTL", 1.25),
+            k!("LEFT"),
+            k!("DOWN"),
+            k!("RGHT"),
+        ]);
+        if config.function_row {
+            key_rows[0].push(k!("HOME"));
+            key_rows[1].push(k!("PGUP"));
+            key_rows[2].push(k!("PGDN"));
+            key_rows[3].push(k!("END"));
+            key_rows[4].push(k!("INS"));
+        } else {
+            key_rows[0].extend_from_slice(&[k!("HOME")]);
+            key_rows[1].extend_from_slice(&[k!("PGUP")]);
+            key_rows[2].extend_from_slice(&[k!("PGDN")]);
+            key_rows[3].extend_from_slice(&[k!("END")]);
+        }
+        if config.numpad {
+            //TODO: come up with a way to have multi-row keys for KPAD and KPEN?
+            let mut row = 0;
+            if config.function_row {
+                // I171 = NEXTSONG
+                // I172 = PLAYPAUSE
+                // I173 = PREVIOUSSONG
+                key_rows[row].extend_from_slice(&[k!("PRSC"), k!("I173"), k!("I172"), k!("I171")]);
+                row += 1;
+            }
+            key_rows[row].extend_from_slice(&[k!("NMLK"), k!("KPDV"), k!("KPMU"), k!("KPSU")]);
+            key_rows[row + 1].extend_from_slice(&[k!("KP7"), k!("KP8"), k!("KP9"), k!("KPAD")]);
+            key_rows[row + 2].extend_from_slice(&[k!("KP4"), k!("KP5"), k!("KP6"), k!("KPEQ")]);
+            key_rows[row + 3].extend_from_slice(&[k!("KP1"), k!("KP2"), k!("KP3"), k!("KPDL")]);
+            key_rows[row + 4].extend_from_slice(&[k!("KP0", 2.0), k!("KPEN", 2.0)]);
+        }
+        key_rows
+    }
+
+    fn new(keymap: &xkb::Keymap, config: &Config, layout: u32) -> Self {
         assert!(keymap.num_layouts() > layout);
 
-        let key_rows = Setup { numpad: false }.key_rows();
-
         let mut rows = Vec::new();
-        for key_row in key_rows.iter() {
+        for key_row in Self::key_rows(config) {
             let mut row = Vec::with_capacity(key_row.len());
-            for &keyname in key_row.iter() {
-                let width = match keyname {
-                    "BKSL" => 1.5,
-                    "BKSP" => 2.0,
-                    "DELE" => 2.0,
-                    "CAPS" => 1.75,
-                    "LALT" => 1.25,
-                    "LCTL" => 1.25,
-                    "LFSH" => 2.25,
-                    "LWIN" => 1.25,
-                    "RALT" => 1.25,
-                    "RCTL" => 1.25,
-                    "RTSH" => 1.75,
-                    "RTRN" => 2.25,
-                    "RWIN" => 1.25,
-                    "SPCE" => 5.5,
-                    "TAB" => 1.5,
-                    _ => 1.0,
-                };
-
+            for &(keyname, width) in key_row.iter() {
                 let gamepad_mapping = match keyname {
                     "BKSP" => Some(gilrs::Button::West),
                     "CAPS" => Some(gilrs::Button::LeftThumb),
@@ -309,12 +380,18 @@ impl Layout {
                     _ => None,
                 };
 
+                let spacer = match keyname {
+                    "PRSC" | "NMLK" | "KP7" | "KP4" | "KP1" | "KP0" => true,
+                    _ => false,
+                };
+
                 let mut key = Key {
                     id: widget::Id::unique(),
                     levels: vec![KeyLevel::for_name(keyname)],
                     width,
                     keycode: None,
                     gamepad_mapping,
+                    spacer,
                 };
 
                 match keymap.key_by_name(keyname) {

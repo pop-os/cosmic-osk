@@ -10,3 +10,12 @@ serde = { version = "1", features = ["serde_derive"] }
 git = "https://github.com/pop-os/libcosmic"
 default-features = false
 features = ["macro"]
+
+[dependencies.iced_futures]
+git = "https://github.com/pop-os/libcosmic"
+default-features = false
+optional = true
+
+[features]
+default = []
+subscription = ["cosmic-config/subscription", "iced_futures"]

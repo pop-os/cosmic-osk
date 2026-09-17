@@ -13,10 +13,7 @@ use cosmic::{
             runtime::wayland::layer_surface::{IcedMargin, IcedOutput, SctkLayerSurfaceSettings},
             shell::{
                 commands::blur::blur,
-                wayland::commands::layer_surface::{
-                    Anchor, KeyboardInteractivity, Layer, destroy_layer_surface, get_layer_surface,
-                    set_input_zone, set_show_on_lock,
-                },
+                wayland::commands::layer_surface::{self, Anchor, KeyboardInteractivity, Layer},
             },
         },
         runtime::platform_specific::wayland::CornerRadius,
@@ -36,7 +33,7 @@ use reis::ei::keyboard::KeyState;
 use std::{
     any::TypeId,
     collections::{HashMap, HashSet},
-    env,
+    env, process,
     time::{Duration, Instant},
 };
 use unicode_width::UnicodeWidthStr;
@@ -50,6 +47,9 @@ mod layout;
 pub mod localize;
 
 mod menu;
+
+use spawn_detached::spawn_detached;
+mod spawn_detached;
 
 mod wayland;
 
@@ -74,7 +74,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     localize::localize();
 
-    let (config_handler, config) = match cosmic_config::Config::new(Config::ID, Config::VERSION) {
+    let (config_handler, config) = match Config::handler() {
         Ok(config_handler) => {
             let config = Config::get_entry(&config_handler).unwrap_or_else(|(errs, config)| {
                 log::info!("errors loading config: {:?}", errs);
@@ -107,6 +107,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     None,
+    SetAppTheme(AppTheme),
+    SetFunctionRow(bool),
+    SetNumpad(bool),
+    Settings,
 }
 
 impl MenuAction for Action {
@@ -115,6 +119,10 @@ impl MenuAction for Action {
     fn message(&self) -> Message {
         match self {
             Self::None => Message::None,
+            Self::SetAppTheme(app_theme) => Message::SetAppTheme(*app_theme),
+            Self::SetFunctionRow(function_row) => Message::SetFunctionRow(*function_row),
+            Self::SetNumpad(numpad) => Message::SetNumpad(*numpad),
+            Self::Settings => Message::Settings,
         }
     }
 }
@@ -234,6 +242,10 @@ pub enum Message {
         seat_id: u32,
         active: bool,
     },
+    SetAppTheme(AppTheme),
+    SetFunctionRow(bool),
+    SetNumpad(bool),
+    Settings,
     Size(Size),
     Ei(ei::Msg),
     Gilrs(gilrs::Event),
@@ -271,6 +283,7 @@ pub struct App {
     surface_auto_pos: bool,
     surface_id: Option<window::Id>,
     surface_rect: Rectangle,
+    xkb_keymap: Option<xkb::Keymap>,
     xkb_state: Option<xkb::State>,
     // TODO reis state
     ei_conn: Option<reis::event::Connection>,
@@ -283,14 +296,54 @@ pub struct App {
 }
 
 impl App {
+    pub fn on_subcommand(&mut self, subcommand: &str) -> Task<Message> {
+        match subcommand {
+            "hide" => {
+                if let Some(handler) = &self.config_handler {
+                    if let Err(err) = self.config.set_always_shown(handler, false) {
+                        log::error!("failed to set always_show: {}", err);
+                    }
+                }
+            }
+            "show" => {
+                if let Some(handler) = &self.config_handler {
+                    if let Err(err) = self.config.set_always_shown(handler, true) {
+                        log::error!("failed to set always_show: {}", err);
+                    }
+                }
+            }
+            _ => {
+                log::warn!("unknown subcommand {:?}", subcommand);
+            }
+        }
+        Task::none()
+    }
+
     pub fn update_config(&mut self) -> Task<Message> {
-        let mut tasks = Vec::with_capacity(2);
+        let mut tasks = Vec::with_capacity(4);
+
+        if let Some(xkb_keymap) = &self.xkb_keymap {
+            //TODO: only run when layout related config changes
+            self.layouts = Layout::all(xkb_keymap, &self.config);
+            if self.surface_id.is_some() {
+                let old = self.surface_rect;
+                self.update_surface_rect();
+                if old != self.surface_rect {
+                    //TODO: smarter way of updating size
+                    tasks.push(self.hide(false));
+                    tasks.push(self.show(self.show_reason));
+                }
+            }
+        }
+
         tasks.push(cosmic::command::set_theme(config_theme(&self.config)));
+
         if self.config.always_shown {
             tasks.push(self.show(ShowReason::AlwaysShow));
         } else if matches!(self.show_reason, ShowReason::AlwaysShow) {
             tasks.push(self.hide(false));
         }
+
         Task::batch(tasks)
     }
 
@@ -307,10 +360,31 @@ impl App {
 
         self.release_all();
         if let Some(surface_id) = self.surface_id.take() {
-            destroy_layer_surface(surface_id)
+            layer_surface::destroy_layer_surface(surface_id)
         } else {
             Task::none()
         }
+    }
+
+    pub fn update_surface_rect(&mut self) {
+        self.surface_rect.width = 0.0;
+        self.surface_rect.height = 0.0;
+        if let Some(layouts) = &self.layouts {
+            for layout in layouts.iter() {
+                let layer_height = (self.key_size + self.key_padding) * layout.rows.len();
+                self.surface_rect.height = self.surface_rect.height.max(layer_height as f32);
+                for row in layout.rows.iter() {
+                    let mut row_width = 0.0;
+                    for key in row.iter() {
+                        row_width += key.width * (self.key_size as f32)
+                            + if key.spacer { 3.0 } else { 1.0 } * self.key_padding as f32;
+                    }
+                    self.surface_rect.width = self.surface_rect.width.max(row_width);
+                }
+            }
+        }
+        //TODO: properly calculate additional space from top row
+        self.surface_rect.height += 32.0;
     }
 
     pub fn show(&mut self, reason: ShowReason) -> Task<Message> {
@@ -321,21 +395,7 @@ impl App {
 
         self.show_reason = reason;
 
-        self.surface_rect.width = 0.0;
-        self.surface_rect.height = 0.0;
-        if let Some(layouts) = &self.layouts {
-            for layout in layouts.iter() {
-                let layer_height = (self.key_size + self.key_padding * 2) * layout.rows.len();
-                self.surface_rect.height = self.surface_rect.height.max(layer_height as f32);
-                for row in layout.rows.iter() {
-                    let mut row_width = 0.0;
-                    for key in row.iter() {
-                        row_width += key.width * (self.key_size as f32) + self.key_padding as f32;
-                    }
-                    self.surface_rect.width = self.surface_rect.width.max(row_width);
-                }
-            }
-        }
+        self.update_surface_rect();
 
         let surface_id = window::Id::unique();
         self.surface_id = Some(surface_id);
@@ -370,7 +430,8 @@ impl App {
         }
 
         log::info!("get_layer_surface");
-        get_layer_surface(settings).chain(set_show_on_lock(surface_id, true))
+        layer_surface::get_layer_surface(settings)
+            .chain(layer_surface::set_show_on_lock(surface_id, true))
     }
 
     pub fn gamepad_svg(&self, button: &gilrs::Button) -> Option<&'static str> {
@@ -542,7 +603,7 @@ impl Application for App {
     type Message = Message;
 
     /// The unique application ID to supply to the window manager.
-    const APP_ID: &'static str = "com.system76.CosmicOSK";
+    const APP_ID: &'static str = Config::ID;
 
     fn core(&self) -> &Core {
         &self.core
@@ -554,7 +615,7 @@ impl Application for App {
 
     /// Creates the application, and optionally emits command on initialize.
     fn init(core: Core, flags: Self::Flags) -> (Self, Task<Self::Message>) {
-        let app = App {
+        let mut app = App {
             core,
             config_handler: flags.config_handler,
             config: flags.config,
@@ -574,6 +635,7 @@ impl Application for App {
             surface_auto_pos: true,
             surface_id: None,
             surface_rect: Rectangle::default(),
+            xkb_keymap: None,
             xkb_state: None,
             ei_conn: None,
             ei_button: None,
@@ -584,18 +646,19 @@ impl Application for App {
             gamepad_shown: false,
         };
 
-        (app, Task::none())
+        let task = if let Some(subcommand) = flags.subcommand_opt {
+            app.on_subcommand(&subcommand)
+        } else {
+            Task::none()
+        };
+        (app, task)
     }
 
     fn dbus_activation(&mut self, message: dbus_activation::Message) -> Task<Message> {
         match message.msg {
-            dbus_activation::Details::ActivateAction { action, .. } => match action.as_str() {
-                "hide" => return self.hide(true),
-                "show" => return self.show(ShowReason::Manual),
-                _ => {
-                    log::warn!("unknown subcommand {:?}", action);
-                }
-            },
+            dbus_activation::Details::ActivateAction { action, .. } => {
+                return self.on_subcommand(&action);
+            }
             _ => {
                 log::warn!("ignoring DBUS activation message {:?}", message)
             }
@@ -608,6 +671,33 @@ impl Application for App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        // Helper for updating config values efficiently
+        macro_rules! config_set {
+            ($name: ident, $value: expr) => {
+                match &self.config_handler {
+                    Some(config_handler) => {
+                        match paste::paste! { self.config.[<set_ $name>](config_handler, $value) } {
+                            Ok(_) => {}
+                            Err(err) => {
+                                log::warn!(
+                                    "failed to save config {:?}: {}",
+                                    stringify!($name),
+                                    err
+                                );
+                            }
+                        }
+                    }
+                    None => {
+                        self.config.$name = $value;
+                        log::warn!(
+                            "failed to save config {:?}: no config handler",
+                            stringify!($name)
+                        );
+                    }
+                }
+            };
+        }
+
         match message {
             Message::None => {}
             Message::Config(config) => {
@@ -681,7 +771,10 @@ impl Application for App {
                     self.surface_rect = self.drag.surface_rect;
                     self.drag = DragState::default();
                     if let Some(surface_id) = self.surface_id {
-                        return set_input_zone(surface_id, Some(vec![self.surface_rect]));
+                        return layer_surface::set_input_zone(
+                            surface_id,
+                            Some(vec![self.surface_rect]),
+                        );
                     }
                 }
             }
@@ -812,6 +905,26 @@ impl Application for App {
                     return self.hide(false);
                 }
             }
+            Message::SetAppTheme(app_theme) => {
+                config_set!(app_theme, app_theme);
+            }
+            Message::SetFunctionRow(function_row) => {
+                config_set!(function_row, function_row);
+            }
+            Message::SetNumpad(numpad) => {
+                config_set!(numpad, numpad);
+            }
+            Message::Settings => {
+                let arg = "accessibility-osk";
+                let mut command = process::Command::new("cosmic-settings");
+                command.arg(arg);
+                match spawn_detached(&mut command) {
+                    Ok(()) => {}
+                    Err(err) => {
+                        log::warn!("failed to run cosmic-settings {arg}: {err}");
+                    }
+                }
+            }
             Message::Size(size) => {
                 log::info!("size: {:?}", size);
                 if let Some(surface_id) = self.surface_id
@@ -823,7 +936,10 @@ impl Application for App {
                         // Automatically position at center bottom when first floated
                         self.surface_rect.x = (size.width - self.surface_rect.width) / 2.0;
                         self.surface_rect.y = size.height - self.surface_rect.height;
-                        tasks.push(set_input_zone(surface_id, Some(vec![self.surface_rect])));
+                        tasks.push(layer_surface::set_input_zone(
+                            surface_id,
+                            Some(vec![self.surface_rect]),
+                        ));
                     }
                     let t = cosmic::theme::active();
                     let theme = t.cosmic();
@@ -919,16 +1035,10 @@ impl Application for App {
                                 .unwrap()
                                 .unwrap()
                             };
-                            let layouts =
-                                Layout::all(&xkb_keymap).unwrap_or_else(|| vec![Layout::default()]);
 
-                            self.layouts = Some(layouts);
                             self.xkb_state = Some(xkb::State::new(&xkb_keymap));
-
-                            if self.config.always_shown {
-                                //TODO: destroy and recreate surface when layout changes?
-                                return self.show(ShowReason::AlwaysShow);
-                            }
+                            self.xkb_keymap = Some(xkb_keymap);
+                            return self.update_config();
                         }
 
                         // This starts emulating if a non-keyboard device is found. The keyboard type does it above
@@ -1331,6 +1441,10 @@ impl Application for App {
                             });
                     }
 
+                    if key.spacer {
+                        r = r.push(widget::space().width(2 * self.key_padding as u16));
+                    }
+
                     r = r.push(
                         widget::container(button)
                             .padding(self.key_padding as u16)
@@ -1446,7 +1560,6 @@ impl Application for App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        struct ConfigSubscription;
         struct WaylandSubscription;
         struct GilrsSubscription;
 
@@ -1488,12 +1601,7 @@ impl Application for App {
                 ) => Some(Message::Size(size)),
                 _ => None,
             }),
-            cosmic_config::config_subscription::<_, Config>(
-                TypeId::of::<ConfigSubscription>(),
-                Config::ID.into(),
-                Config::VERSION,
-            )
-            .map(|update| {
+            Config::subscription().map(|update| {
                 if !update.errors.is_empty() {
                     log::warn!("config errors: {:?}", update.errors);
                 }

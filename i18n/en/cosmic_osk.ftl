@@ -1,6 +1,13 @@
+appearance = Appearance
+    .match-desktop = Match desktop
+    .dark = Dark
+    .light = Light
 close-keyboard = close keyboard
 float-keyboard = float keyboard
 left-click = left click
+numpad = Numpad
 open-keyboard = open keyboard
 right-click = right click
 scroll = scroll
+settings = Settings...
+system-and-function-keys = System and function keys
