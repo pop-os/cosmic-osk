@@ -6,10 +6,12 @@ edition = "2024"
 [dependencies]
 calloop = "0.14"
 calloop-wayland-source = "0.4"
-cosmic-osk-config = { path = "config" }
+cosmic-osk-config = { path = "config", features = ["subscription"] }
 env_logger = "0.11"
 gilrs = "0.11"
+libc = "0.2"
 log = "0.4"
+paste = "1"
 tokio = { version = "1", features = ["rt"] }
 unicode-width = "0.2"
 wayland-client = "0.31"
