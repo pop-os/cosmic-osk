@@ -86,7 +86,23 @@ pub fn menu_bar<'a>(
                     ),
                     //TODO: Opacity
                     menu::Item::Divider,
-                    menu::Item::Button(fl!("settings"), None, Action::Settings),
+                    menu::Item::Folder(
+                        fl!("launch-keyboard"),
+                        vec![
+                            menu::Item::CheckBox(
+                                fl!("launch-keyboard", "gamepad-shortcut"),
+                                None,
+                                config.gamepad_shortcut,
+                                Action::SetGamepadShortcut(!config.gamepad_shortcut),
+                            ),
+                            menu::Item::CheckBox(
+                                fl!("launch-keyboard", "text-input"),
+                                None,
+                                config.ime_activation,
+                                Action::SetImeActivation(!config.ime_activation),
+                            ),
+                        ],
+                    ),
                 ],
             ),
         ),
