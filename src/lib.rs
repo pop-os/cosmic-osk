@@ -33,7 +33,7 @@ use reis::ei::keyboard::KeyState;
 use std::{
     any::TypeId,
     collections::{HashMap, HashSet},
-    env, process,
+    env,
     time::{Duration, Instant},
 };
 use unicode_width::UnicodeWidthStr;
@@ -47,9 +47,6 @@ mod layout;
 pub mod localize;
 
 mod menu;
-
-use spawn_detached::spawn_detached;
-mod spawn_detached;
 
 mod wayland;
 
@@ -109,8 +106,9 @@ pub enum Action {
     None,
     SetAppTheme(AppTheme),
     SetFunctionRow(bool),
+    SetGamepadShortcut(bool),
+    SetImeActivation(bool),
     SetNumpad(bool),
-    Settings,
 }
 
 impl MenuAction for Action {
@@ -119,10 +117,11 @@ impl MenuAction for Action {
     fn message(&self) -> Message {
         match self {
             Self::None => Message::None,
-            Self::SetAppTheme(app_theme) => Message::SetAppTheme(*app_theme),
-            Self::SetFunctionRow(function_row) => Message::SetFunctionRow(*function_row),
-            Self::SetNumpad(numpad) => Message::SetNumpad(*numpad),
-            Self::Settings => Message::Settings,
+            Self::SetAppTheme(value) => Message::SetAppTheme(*value),
+            Self::SetFunctionRow(value) => Message::SetFunctionRow(*value),
+            Self::SetGamepadShortcut(value) => Message::SetGamepadShortcut(*value),
+            Self::SetImeActivation(value) => Message::SetImeActivation(*value),
+            Self::SetNumpad(value) => Message::SetNumpad(*value),
         }
     }
 }
@@ -244,8 +243,9 @@ pub enum Message {
     },
     SetAppTheme(AppTheme),
     SetFunctionRow(bool),
+    SetGamepadShortcut(bool),
+    SetImeActivation(bool),
     SetNumpad(bool),
-    Settings,
     Size(Size),
     Ei(ei::Msg),
     Gilrs(gilrs::Event),
@@ -911,19 +911,14 @@ impl Application for App {
             Message::SetFunctionRow(function_row) => {
                 config_set!(function_row, function_row);
             }
+            Message::SetGamepadShortcut(gamepad_shortcut) => {
+                config_set!(gamepad_shortcut, gamepad_shortcut);
+            }
+            Message::SetImeActivation(ime_activation) => {
+                config_set!(ime_activation, ime_activation);
+            }
             Message::SetNumpad(numpad) => {
                 config_set!(numpad, numpad);
-            }
-            Message::Settings => {
-                let arg = "accessibility-osk";
-                let mut command = process::Command::new("cosmic-settings");
-                command.arg(arg);
-                match spawn_detached(&mut command) {
-                    Ok(()) => {}
-                    Err(err) => {
-                        log::warn!("failed to run cosmic-settings {arg}: {err}");
-                    }
-                }
             }
             Message::Size(size) => {
                 log::info!("size: {:?}", size);
