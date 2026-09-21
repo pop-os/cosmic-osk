@@ -52,7 +52,7 @@ impl Default for Config {
         Self {
             app_theme: AppTheme::System,
             always_shown: false,
-            function_row: true,
+            function_row: false,
             gamepad_shortcut: false,
             ime_activation: false,
             numpad: false,
