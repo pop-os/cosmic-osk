@@ -293,6 +293,7 @@ pub struct App {
     ei_scroll: Option<(reis::ei::Device, reis::ei::Scroll)>,
     gamepads: HashMap<gilrs::GamepadId, GamepadState>,
     gamepad_shown: bool,
+    layer: Layer,
 }
 
 impl App {
@@ -311,6 +312,9 @@ impl App {
                         log::error!("failed to set always_show: {}", err);
                     }
                 }
+            }
+            "overlay" => {
+                self.layer = Layer::Overlay;
             }
             _ => {
                 log::warn!("unknown subcommand {:?}", subcommand);
@@ -402,7 +406,7 @@ impl App {
 
         let mut settings = SctkLayerSurfaceSettings {
             id: surface_id,
-            layer: Layer::Top,
+            layer: self.layer,
             keyboard_interactivity: KeyboardInteractivity::None,
             input_zone: None,
             anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
@@ -644,6 +648,7 @@ impl Application for App {
             ei_scroll: None,
             gamepads: HashMap::new(),
             gamepad_shown: false,
+            layer: Layer::Top,
         };
 
         let task = if let Some(subcommand) = flags.subcommand_opt {
