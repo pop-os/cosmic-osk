@@ -3,6 +3,7 @@
 use cosmic::{
     Element,
     app::Core,
+    iced::window,
     theme,
     widget::{
         self,
@@ -18,6 +19,7 @@ pub fn menu_bar<'a>(
     _core: &Core,
     config: &Config,
     key_binds: &HashMap<KeyBind, Action>,
+    window_id: Option<window::Id>,
 ) -> Element<'a, Message> {
     menu::bar(vec![
         /*TODO: compact and mobile modes
@@ -107,6 +109,8 @@ pub fn menu_bar<'a>(
             ),
         ),
     ])
+    .on_surface_action(Message::Surface)
+    .window_id_maybe(window_id)
     .item_height(menu::ItemHeight::Dynamic(40))
     .item_width(menu::ItemWidth::Uniform(320))
     .spacing(theme::active().cosmic().spacing.space_xxxs.into())

@@ -247,6 +247,7 @@ pub enum Message {
     SetImeActivation(bool),
     SetNumpad(bool),
     Size(Size),
+    Surface(cosmic::surface::Action<Message>),
     Ei(ei::Msg),
     Gilrs(gilrs::Event),
 }
@@ -293,7 +294,6 @@ pub struct App {
     ei_scroll: Option<(reis::ei::Device, reis::ei::Scroll)>,
     gamepads: HashMap<gilrs::GamepadId, GamepadState>,
     gamepad_shown: bool,
-    layer: Layer,
 }
 
 impl App {
@@ -312,9 +312,6 @@ impl App {
                         log::error!("failed to set always_show: {}", err);
                     }
                 }
-            }
-            "overlay" => {
-                self.layer = Layer::Overlay;
             }
             _ => {
                 log::warn!("unknown subcommand {:?}", subcommand);
@@ -406,7 +403,7 @@ impl App {
 
         let mut settings = SctkLayerSurfaceSettings {
             id: surface_id,
-            layer: self.layer,
+            layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::None,
             input_zone: None,
             anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
@@ -648,7 +645,6 @@ impl Application for App {
             ei_scroll: None,
             gamepads: HashMap::new(),
             gamepad_shown: false,
-            layer: Layer::Top,
         };
 
         let task = if let Some(subcommand) = flags.subcommand_opt {
@@ -924,6 +920,9 @@ impl Application for App {
             }
             Message::SetNumpad(numpad) => {
                 config_set!(numpad, numpad);
+            }
+            Message::Surface(action) => {
+                return cosmic::task::message(cosmic::Action::Surface(action));
             }
             Message::Size(size) => {
                 log::info!("size: {:?}", size);
@@ -1461,7 +1460,7 @@ impl Application for App {
 
         let mut column = widget::column::with_capacity(2);
         column = column.push(widget::row::with_children(vec![
-            menu::menu_bar(&self.core, &self.config, &self.key_binds).into(),
+            menu::menu_bar(&self.core, &self.config, &self.key_binds, self.surface_id).into(),
             widget::space().width(Length::Fill).into(),
             if self.docked {
                 widget::button::icon(
