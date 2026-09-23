@@ -246,7 +246,7 @@ pub enum Message {
     SetGamepadShortcut(bool),
     SetImeActivation(bool),
     SetNumpad(bool),
-    Size(Size),
+    Size(window::Id, Size),
     Surface(cosmic::surface::Action<Message>),
     Ei(ei::Msg),
     Gilrs(gilrs::Event),
@@ -924,9 +924,11 @@ impl Application for App {
             Message::Surface(action) => {
                 return cosmic::task::message(cosmic::Action::Surface(action));
             }
-            Message::Size(size) => {
+            Message::Size(id, size) => {
                 log::info!("size: {:?}", size);
+                // Popups (menus) also send size events, only track the keyboard surface
                 if let Some(surface_id) = self.surface_id
+                    && surface_id == id
                     && !self.docked
                 {
                     let mut tasks = Vec::with_capacity(2);
@@ -1563,7 +1565,7 @@ impl Application for App {
         struct GilrsSubscription;
 
         Subscription::batch([
-            event::listen_with(|event, status, _surface_id| match (event, status) {
+            event::listen_with(|event, status, surface_id| match (event, status) {
                 //TODO: use mouse position at start of drag
                 (
                     event::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
@@ -1597,7 +1599,7 @@ impl Application for App {
                         window::Event::Opened { size, .. } | window::Event::Resized(size),
                     ),
                     _,
-                ) => Some(Message::Size(size)),
+                ) => Some(Message::Size(surface_id, size)),
                 _ => None,
             }),
             Config::subscription().map(|update| {
