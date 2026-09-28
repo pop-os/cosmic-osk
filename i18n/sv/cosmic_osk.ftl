@@ -1,0 +1,15 @@
+appearance = Utseende
+    .match-desktop = Matcha skrivbordet
+    .dark = Mörkt
+    .light = Ljust
+close-keyboard = stäng tangentbord
+float-keyboard = flytande tangentbord
+launch-keyboard = Starta skärmtangentbordet
+    .gamepad-shortcut = Start och Select/tillbaka på spelkontroller
+    .text-input = När ett textfält väljs
+left-click = vänster klick
+numpad = Numpad
+open-keyboard = öppna tangentbord
+right-click = höger klick
+scroll = scroll
+system-and-function-keys = System och funktionstangenter
