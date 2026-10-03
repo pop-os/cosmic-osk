@@ -1,0 +1,15 @@
+appearance = 外观
+    .match-desktop = 匹配桌面
+    .dark = 暗色模式
+    .light = 亮色模式
+close-keyboard = 关闭键盘
+float-keyboard = 悬浮键盘
+launch-keyboard = 启动屏幕键盘
+    .gamepad-shortcut = 游戏手柄上的“开始”和“选择/后退”键
+    .text-input = 选择文本框时
+left-click = 左键
+numpad = 数字键盘
+open-keyboard = 打开键盘
+right-click = 右键
+system-and-function-keys = 系统与功能键
+scroll = 滚动

@@ -1,0 +1,15 @@
+appearance = Megjelenés
+    .match-desktop = Rendszertéma
+    .dark = Sötét
+    .light = Világos
+close-keyboard = billentyűzet bezárása
+float-keyboard = lebegő billentyűzet
+launch-keyboard = Képernyő-billentyűzet megnyitása
+    .gamepad-shortcut = Start és Select/Vissza gamepaden
+    .text-input = Szövegmező kijelölésekor
+left-click = bal kattintás
+numpad = Numerikus billentyűzet
+open-keyboard = billentyűzet megnyitása
+right-click = jobb kattintás
+scroll = görgetés
+system-and-function-keys = Rendszer- és funkcióbillentyűk
