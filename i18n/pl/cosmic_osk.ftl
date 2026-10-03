@@ -1,0 +1,15 @@
+appearance = Wygląd
+    .match-desktop = Dopasuj do Pulpitu
+    .dark = Ciemny
+    .light = Jasny
+close-keyboard = zamknij klawiaturę
+float-keyboard = Pływająca klawiatura
+launch-keyboard = Uruchom klawiaturę ekranową
+    .gamepad-shortcut = Start i Select/Back na kontrolerach
+    .text-input = Kiedy pole tekstowe jest wybieraned
+left-click = lewy przycisk
+numpad = Numpad
+open-keyboard = otwórz klawiaturę
+right-click = prawy przycisk
+scroll = scroll
+system-and-function-keys = Klawisze systemowe i funkcyjne

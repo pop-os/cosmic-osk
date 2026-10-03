@@ -1,0 +1,15 @@
+appearance = Aparência
+    .match-desktop = Estilo do sistema
+    .dark = Estilo escuro
+    .light = Estilo claro
+close-keyboard = fechar teclado
+float-keyboard = teclado flutuante
+launch-keyboard = Abrir teclado virtual
+    .gamepad-shortcut = Iniciar e Selecionar/Voltar em controles de jogo
+    .text-input = Ao selecionar um campo de texto
+left-click = clique esquerdo
+numpad = Teclado numérico
+open-keyboard = abrir teclado
+right-click = clique direito
+scroll = rolagem
+system-and-function-keys = Teclas de sistema e de função

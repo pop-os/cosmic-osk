@@ -1,0 +1,15 @@
+appearance = Тема
+    .match-desktop = Как в системе
+    .dark = Тёмная
+    .light = Светлая
+close-keyboard = закрыть клавиатуру
+float-keyboard = плавающий режим
+launch-keyboard = Запуск Экранной клавиатуры
+    .gamepad-shortcut = При нажатии «Start» и «Select/Back» на контроллерах
+    .text-input = При выборе текстового поля
+left-click = левый клик
+numpad = Цифровой блок
+open-keyboard = открыть клавиатуру
+right-click = правый клик
+scroll = прокрутка
+system-and-function-keys = Системные и функциональные клавиши

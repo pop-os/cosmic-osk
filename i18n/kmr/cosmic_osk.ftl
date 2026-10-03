@@ -1,0 +1,15 @@
+appearance = Xuyang
+    .match-desktop = Li gorî sermaseyê
+    .dark = Tarî
+    .light = Ronî
+close-keyboard = Kilîtdankê bigire
+float-keyboard = Kilîtdanka herikbar
+left-click = Tikandina çepê
+open-keyboard = Kilîtdankê veke
+right-click = Tikandina rastê
+scroll = Bişemtîne
+system-and-function-keys = Bişkokên pergal û fonksiyonê
+launch-keyboard = Kilîtdanka li ser dîmenderê bide destpêkirin
+    .gamepad-shortcut = Li ser gamepad dest pê bike û Hilbijêre/Vegere
+    .text-input = Di dema hilbijartina qadeke nivîsê de
+numpad = Numpad
