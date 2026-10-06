@@ -1,3 +1,9 @@
+cosmic-osk (1.10.0) noble; urgency=medium
+
+  * Epoch 1.10.0 version update
+
+ -- Michael Murphy <michael@mmurphy.dev>  Wed, 07 Oct 2026 00:24:50 +0200
+
 cosmic-osk (0.1.0) jammy; urgency=medium
 
   * Initial release.
