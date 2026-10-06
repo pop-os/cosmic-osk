@@ -1,0 +1,15 @@
+appearance = Aussehen
+    .match-desktop = An Desktop anpassen
+    .dark = Dunkel
+    .light = Hell
+close-keyboard = Tastatur schließen
+launch-keyboard = Bildschirmtastatur öffnen
+    .gamepad-shortcut = Start und Select/Back auf Gamepads
+    .text-input = Bei Auswahl eines Textfelds
+left-click = Linksklick
+numpad = Ziffernblock
+open-keyboard = Tastatur öffnen
+right-click = Rechtsklick
+system-and-function-keys = System- und Funktionstasten
+float-keyboard = schwebende Tastatur
+scroll = Scrollen

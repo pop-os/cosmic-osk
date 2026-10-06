@@ -1,0 +1,15 @@
+appearance = Vzhled
+    .match-desktop = Podle systému
+    .dark = Tmavý
+    .light = Světlý
+close-keyboard = zavřít klávesnici
+left-click = levý klik
+numpad = Numerická klávesnice
+open-keyboard = otevřít klávesnici
+right-click = pravý klik
+system-and-function-keys = Systémové a funkční klávesy
+float-keyboard = plovoucí klávesnice
+launch-keyboard = Spouštění klávesnice na obrazovce
+    .gamepad-shortcut = Tlačítka Start a Select/Back na gamepadech
+    .text-input = Při výběru textového pole
+scroll = rolování

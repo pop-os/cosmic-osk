@@ -1,0 +1,15 @@
+appearance = Aparencia
+    .match-desktop = Seguir o escritorio
+    .dark = Escuro
+    .light = Claro
+close-keyboard = Pechar teclado
+float-keyboard = Teclado flotante
+launch-keyboard = Executar o teclado na pantalla
+    .gamepad-shortcut = Start e Select/Atrás en mandos de xogo
+    .text-input = Ao seleccionar un campo de texto
+left-click = Click esquerdo
+numpad = Teclado Numerico
+open-keyboard = Abrir teclado
+right-click = Click dereito
+scroll = desprazamento
+system-and-function-keys = Teclas do sistema e de función

@@ -1,0 +1,15 @@
+appearance = Tampilan
+    .match-desktop = Cocokkan desktop
+    .dark = Gelap
+    .light = Terang
+close-keyboard = papan ketik tertutup
+float-keyboard = papan ketik mengambang
+launch-keyboard = Luncurkan papan ketik di layar
+    .gamepad-shortcut = Mulai dan Pilih/Kembali pada gamepad
+    .text-input = Saat memilih kolom teks
+left-click = klik kiri
+numpad = Numpad
+open-keyboard = papan ketik terbuka
+right-click = klik kanan
+scroll = gulir
+system-and-function-keys = Tombol sistem dan fungsi

@@ -1,0 +1,15 @@
+appearance = Вигляд
+    .match-desktop = Підігнати під стільницю
+    .dark = Темна
+    .light = Світла
+close-keyboard = закрити клавіатуру
+float-keyboard = плавуча клавіатура
+launch-keyboard = Відкрити екранну клавіатуру
+    .gamepad-shortcut = Start і Select/Back на ґеймпадах
+    .text-input = Під час вибору текстового поля
+left-click = лівий клац
+numpad = Цифровий блок
+open-keyboard = відкрити клавіатуру
+right-click = правий клац
+scroll = гортати
+system-and-function-keys = Системні та функціональні клавіші

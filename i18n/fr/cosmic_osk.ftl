@@ -1,0 +1,15 @@
+appearance = Apparence
+    .match-desktop = Assortir au bureau
+    .dark = Sombre
+    .light = Clair
+close-keyboard = fermer clavier
+float-keyboard = clavier flottant
+left-click = clic gauche
+numpad = Pavé num.
+open-keyboard = ouvrir clavier
+right-click = clic droit
+scroll = défiler
+launch-keyboard = Lancer le clavier virtuel
+    .gamepad-shortcut = Start et Select/Retour sur les manettes
+    .text-input = Lors de la sélection d’un champ texte
+system-and-function-keys = Clés système et fonction
