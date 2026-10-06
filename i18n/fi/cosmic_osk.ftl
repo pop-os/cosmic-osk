@@ -1,0 +1,15 @@
+appearance = Ulkoasu
+    .match-desktop = Sama kuin työpöytä
+    .dark = Tumma
+    .light = Vaalea
+close-keyboard = sulje näppäimistö
+float-keyboard = kelluva näppäimistö
+launch-keyboard = Käynnistä näyttönäppäimistö
+    .gamepad-shortcut = Käynnistä ja Valitse/takaisin peliohjaimella
+    .text-input = Tekstikenttää valittaessa
+left-click = vasen napsautus
+numpad = Numeronäppäimistö
+open-keyboard = avaa näppäimistö
+right-click = oikea napsautus
+scroll = vieritys
+system-and-function-keys = Järjestelmä- ja toimintonäppäimet

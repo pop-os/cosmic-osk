@@ -1,0 +1,15 @@
+left-click = αριστερό κλικ
+numpad = Αριθμητικό πληκτρολόγιο
+open-keyboard = άνοιγμα πληκτρολογίου
+right-click = δεξί κλικ
+scroll = κύλιση
+close-keyboard = κλείσιμο πληκτρολογίου
+float-keyboard = αιωρούμενο πληκτρολόγιο
+appearance = Εμφάνιση
+    .match-desktop = Συμφωνία με την επιφάνεια εργασίας
+    .dark = Σκουρόχρωμο
+    .light = Ανοιχτόχρωμο
+launch-keyboard = Εκκίνηση πληκτρολογίου οθόνης
+    .gamepad-shortcut = Κουμπιά «Start» και «Select»/κουμπί επιστροφής σε χειριστήρια παιχνιδιών
+    .text-input = Κατά την επιλογή ενός πεδίου κειμένου
+system-and-function-keys = Πλήκτρα συστήματος και λειτουργιών

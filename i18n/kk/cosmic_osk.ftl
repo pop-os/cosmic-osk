@@ -1,0 +1,15 @@
+appearance = Сыртқы көрініс
+    .match-desktop = Жұмыс үстеліне сәйкес
+    .dark = Қараңғы
+    .light = Ашық
+close-keyboard = пернетақтаны жабу
+float-keyboard = пернетақтаны қалқыту
+launch-keyboard = Экрандық пернетақтаны іске қосу
+    .gamepad-shortcut = Геймпадтарда Start және Select/Back
+    .text-input = Мәтіндік өріс таңдалғанда
+left-click = сол жақпен шерту
+numpad = Цифрлық пернетақта
+open-keyboard = пернетақтаны ашу
+right-click = оң жақпен шерту
+scroll = айналдыру
+system-and-function-keys = Жүйелік және функционалды пернелер

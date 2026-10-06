@@ -1,0 +1,15 @@
+appearance = 外觀
+    .match-desktop = 符合桌面
+    .dark = 深色
+    .light = 淺色
+close-keyboard = 關閉鍵盤
+float-keyboard = 懸浮鍵盤
+launch-keyboard = 啟動螢幕鍵盤
+    .gamepad-shortcut = 遊戲手把上的「開始」與「選擇／返回」按鈕
+    .text-input = 選擇文字欄位時
+left-click = 左鍵點擊
+numpad = 數字鍵盤
+open-keyboard = 開啟鍵盤
+right-click = 右鍵點擊
+scroll = 捲動
+system-and-function-keys = 系統鍵和功能鍵
