@@ -246,7 +246,8 @@ pub enum Message {
     SetGamepadShortcut(bool),
     SetImeActivation(bool),
     SetNumpad(bool),
-    Size(Size),
+    Size(window::Id, Size),
+    Surface(cosmic::surface::Action<Message>),
     Ei(ei::Msg),
     Gilrs(gilrs::Event),
 }
@@ -293,7 +294,6 @@ pub struct App {
     ei_scroll: Option<(reis::ei::Device, reis::ei::Scroll)>,
     gamepads: HashMap<gilrs::GamepadId, GamepadState>,
     gamepad_shown: bool,
-    layer: Layer,
 }
 
 impl App {
@@ -312,9 +312,6 @@ impl App {
                         log::error!("failed to set always_show: {}", err);
                     }
                 }
-            }
-            "overlay" => {
-                self.layer = Layer::Overlay;
             }
             _ => {
                 log::warn!("unknown subcommand {:?}", subcommand);
@@ -406,7 +403,7 @@ impl App {
 
         let mut settings = SctkLayerSurfaceSettings {
             id: surface_id,
-            layer: self.layer,
+            layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::None,
             input_zone: None,
             anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
@@ -648,7 +645,6 @@ impl Application for App {
             ei_scroll: None,
             gamepads: HashMap::new(),
             gamepad_shown: false,
-            layer: Layer::Top,
         };
 
         let task = if let Some(subcommand) = flags.subcommand_opt {
@@ -925,9 +921,14 @@ impl Application for App {
             Message::SetNumpad(numpad) => {
                 config_set!(numpad, numpad);
             }
-            Message::Size(size) => {
+            Message::Surface(action) => {
+                return cosmic::task::message(cosmic::Action::Surface(action));
+            }
+            Message::Size(id, size) => {
                 log::info!("size: {:?}", size);
+                // Popups (menus) also send size events, only track the keyboard surface
                 if let Some(surface_id) = self.surface_id
+                    && surface_id == id
                     && !self.docked
                 {
                     let mut tasks = Vec::with_capacity(2);
@@ -1461,7 +1462,7 @@ impl Application for App {
 
         let mut column = widget::column::with_capacity(2);
         column = column.push(widget::row::with_children(vec![
-            menu::menu_bar(&self.core, &self.config, &self.key_binds).into(),
+            menu::menu_bar(&self.core, &self.config, &self.key_binds, self.surface_id).into(),
             widget::space().width(Length::Fill).into(),
             if self.docked {
                 widget::button::icon(
@@ -1564,7 +1565,7 @@ impl Application for App {
         struct GilrsSubscription;
 
         Subscription::batch([
-            event::listen_with(|event, status, _surface_id| match (event, status) {
+            event::listen_with(|event, status, surface_id| match (event, status) {
                 //TODO: use mouse position at start of drag
                 (
                     event::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
@@ -1598,7 +1599,7 @@ impl Application for App {
                         window::Event::Opened { size, .. } | window::Event::Resized(size),
                     ),
                     _,
-                ) => Some(Message::Size(size)),
+                ) => Some(Message::Size(surface_id, size)),
                 _ => None,
             }),
             Config::subscription().map(|update| {
