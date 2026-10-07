@@ -15,7 +15,6 @@ Homepage: https://github.com/pop-os/cosmic-osk
 Package: cosmic-osk
 Architecture: amd64 arm64
 Depends:
-    appstream-data-pop,
     cosmic-icons,
     ${misc:Depends},
     ${shlibs:Depends}
