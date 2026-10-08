@@ -1013,7 +1013,6 @@ version = "1.10.0"
 dependencies = [
  "ashpd 0.13.13",
  "calloop",
- "calloop-wayland-source",
  "cosmic-osk-config",
  "enumflags2",
  "env_logger",
@@ -1031,9 +1030,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "unicode-width",
- "wayland-client",
  "wayland-protocols",
- "wayland-protocols-misc",
  "xkbcommon 0.9.0",
  "zbus",
 ]
