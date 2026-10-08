@@ -48,8 +48,6 @@ pub mod localize;
 
 mod menu;
 
-mod wayland;
-
 fn config_theme(config: &Config) -> theme::Theme {
     match config.app_theme {
         AppTheme::Dark => {
@@ -211,7 +209,6 @@ pub struct GamepadState {
 
 #[derive(Copy, Clone, Debug, Hash)]
 pub struct ImeTimeout {
-    pub seat_id: u32,
     pub active: bool,
     pub instant: Instant,
 }
@@ -228,18 +225,16 @@ pub enum Message {
     Frame(Instant),
     Focus(widget::Id),
     Hide,
+    ImActive {
+        active: bool,
+    },
+    ImActiveTimeout {
+        active: bool,
+    },
     Key {
         kind: layout::KeyKind,
         keycode: layout::KeyCode,
         pressed: bool,
-    },
-    SeatImActive {
-        seat_id: u32,
-        active: bool,
-    },
-    SeatImActiveTimeout {
-        seat_id: u32,
-        active: bool,
     },
     SetAppTheme(AppTheme),
     SetFunctionRow(bool),
@@ -829,6 +824,27 @@ impl Application for App {
             Message::Hide => {
                 return self.hide(true);
             }
+            Message::ImActive { active } => {
+                log::info!("im active: {}", active);
+
+                if self.config.ime_activation && self.surface_id.is_some() != active {
+                    //TODO: ideal timeout time?
+                    self.ime_timeout = Some(ImeTimeout {
+                        active,
+                        instant: Instant::now() + Duration::from_millis(100),
+                    });
+                } else {
+                    self.ime_timeout = None;
+                }
+            }
+            Message::ImActiveTimeout { active } => {
+                log::info!("im active timeout: {}", active);
+                if active {
+                    return self.show(ShowReason::Ime);
+                } else if matches!(self.show_reason, ShowReason::Ime) && !self.config.always_shown {
+                    return self.hide(false);
+                }
+            }
             Message::Key {
                 kind,
                 keycode,
@@ -885,29 +901,6 @@ impl Application for App {
                         .unwrap()
                         .flush()
                         .expect("failed to flush EI connection");
-                }
-            }
-            Message::SeatImActive { seat_id, active } => {
-                log::info!("{} active: {}", seat_id, active);
-
-                if self.config.ime_activation && self.surface_id.is_some() != active {
-                    //TODO: ideal timeout time?
-                    self.ime_timeout = Some(ImeTimeout {
-                        seat_id,
-                        active,
-                        instant: Instant::now() + Duration::from_millis(100),
-                    });
-                } else {
-                    self.ime_timeout = None;
-                }
-            }
-            Message::SeatImActiveTimeout { seat_id, active } => {
-                log::info!("{} active timeout: {}", seat_id, active);
-                //TODO: use seat_id?
-                if active {
-                    return self.show(ShowReason::Ime);
-                } else if matches!(self.show_reason, ShowReason::Ime) && !self.config.always_shown {
-                    return self.hide(false);
                 }
             }
             Message::SetAppTheme(app_theme) => {
@@ -1560,7 +1553,6 @@ impl Application for App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        struct WaylandSubscription;
         struct GilrsSubscription;
 
         Subscription::batch([
@@ -1607,16 +1599,6 @@ impl Application for App {
                 }
                 Message::Config(update.config)
             }),
-            Subscription::run_with(TypeId::of::<WaylandSubscription>(), |_| {
-                stream::channel(
-                    128,
-                    |output: futures::channel::mpsc::Sender<Message>| async move {
-                        tokio::task::spawn_blocking(move || wayland::wayland_task(output))
-                            .await
-                            .unwrap();
-                    },
-                )
-            }),
             Subscription::run_with(TypeId::of::<GilrsSubscription>(), |_| {
                 stream::channel(
                     128,
@@ -1645,8 +1627,7 @@ impl Application for App {
                         move |mut output: futures::channel::mpsc::Sender<Message>| async move {
                             tokio::time::sleep_until(ime_timeout.instant.into()).await;
                             output
-                                .send(Message::SeatImActiveTimeout {
-                                    seat_id: ime_timeout.seat_id,
+                                .send(Message::ImActiveTimeout {
                                     active: ime_timeout.active,
                                 })
                                 .await
