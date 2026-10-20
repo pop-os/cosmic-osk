@@ -1,0 +1,14 @@
+appearance = Aparéncia
+    .match-desktop = Adaptar al burèu
+    .dark = Escur
+    .light = Clar
+close-keyboard = tampar lo clavièr
+float-keyboard = far flotar lo clavièr
+launch-keyboard = Mançar lo clavièr virtual
+    .gamepad-shortcut = Start e Select/Retorn sus las manetas
+    .text-input = En seleccionant un camp de tèxt
+left-click = clic esquèr
+numpad = Pavat numeric
+open-keyboard = dobrir lo clavièr
+scroll = defilament
+system-and-function-keys = Tòcas sistèma e de foncion
