@@ -1,0 +1,15 @@
+appearance = Cuma
+    .match-desktop = Meaitseáil leis an deasc
+    .dark = Dorcha
+    .light = Solas
+close-keyboard = dún an méarchlár
+float-keyboard = méarchlár ar snámh
+launch-keyboard = Lainseáil méarchlár ar an scáileán
+    .gamepad-shortcut = Start agus Select/Back ar ceapacha chluiche
+    .text-input = Agus réimse téacs á roghnú
+left-click = cliceáil ar chlé
+numpad = Ceap uimhreach
+open-keyboard = Oscail an méarchlár
+right-click = cliceáil ar dheis
+scroll = scrollaigh
+system-and-function-keys = Eochracha córais agus feidhme
