@@ -1,0 +1,12 @@
+right-click = Nhấn chuột phải
+left-click = Nhấn chuột trái
+appearance = Giao diện
+    .match-desktop = Đồng bộ với giao diện máy tính
+    .dark = Tối
+    .light = Sáng
+close-keyboard = Đóng bàn phím
+float-keyboard = Bàn phím nổi
+numpad = Bàn phím số
+open-keyboard = Mở bàn phím
+scroll = Cuộn
+system-and-function-keys = Phím hệ thống và phím Fn
