@@ -1,0 +1,15 @@
+appearance = Appearance
+    .match-desktop = Match desktop
+    .dark = Dark
+    .light = Light
+close-keyboard = close keyboard
+float-keyboard = float keyboard
+launch-keyboard = Launch on-screen keyboard
+    .gamepad-shortcut = Start and Select/Back on gamepads
+    .text-input = When selecting a text field
+left-click = left click
+numpad = Numpad
+open-keyboard = open keyboard
+right-click = right click
+scroll = scroll
+system-and-function-keys = System and function keys
