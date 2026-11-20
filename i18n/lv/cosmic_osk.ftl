@@ -1,0 +1,15 @@
+appearance = Izskats
+    .match-desktop = Kā darbvirsmai
+    .dark = Tumšs
+    .light = Gaišs
+close-keyboard = aizvērt tastatūru
+float-keyboard = peldoša tastatūra
+launch-keyboard = Palaist ekrāntastatūru
+    .gamepad-shortcut = Spēļu kontrolieros Start un Select/Back
+    .text-input = Atlasot teksta lauku
+left-click = kreisais klikšķis
+numpad = Ciparu bloks
+open-keyboard = atvērt tastatūru
+right-click = labais klikšķis
+scroll = ritināt
+system-and-function-keys = Sistēmas un funkciju taustiņi

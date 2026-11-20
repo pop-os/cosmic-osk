@@ -1,0 +1,11 @@
+appearance = Uiterlijk
+    .match-desktop = Aan desktop aanpassen
+    .dark = Donker
+    .light = Licht
+close-keyboard = toetsenbord sluiten
+left-click = linksklik
+numpad = Numpad
+open-keyboard = toetsenbord openen
+right-click = rechtsklik
+scroll = scrollen
+system-and-function-keys = Systeem- en functietoetsen
