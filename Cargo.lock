@@ -285,21 +285,6 @@ dependencies = [
 
 [[package]]
 name = "ashpd"
-version = "0.13.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb8421aaa9644a5faf26735f258b669b15f063313ef8f8e2bdb28912a1a6f111"
-dependencies = [
- "enumflags2",
- "futures-util",
- "getrandom 0.4.3",
- "serde",
- "serde_repr",
- "tokio",
- "zbus 5.19.0",
-]
-
-[[package]]
-name = "ashpd"
 version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b60a01f4fbcba6a522ec4d285893bd0ce36f5987a8b3bf636e6aeb2d2acdf8ac"
@@ -309,6 +294,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.4.3",
  "serde",
+ "serde_repr",
  "tokio",
  "wayland-backend",
  "wayland-client",
@@ -1050,10 +1036,9 @@ dependencies = [
 name = "cosmic-osk"
 version = "1.12.0"
 dependencies = [
- "ashpd 0.13.13",
+ "ashpd",
  "calloop",
  "cosmic-osk-config",
- "enumflags2",
  "env_logger",
  "gilrs",
  "i18n-embed 0.15.4",
@@ -1071,7 +1056,7 @@ dependencies = [
  "unicode-width",
  "wayland-protocols",
  "xkbcommon 0.9.0",
- "zbus 5.19.0",
+ "zbus 6.5.0",
 ]
 
 [[package]]
@@ -3267,7 +3252,7 @@ version = "1.0.0"
 source = "git+https://github.com/pop-os/libcosmic#be7937d5c2495d002311709d0e68c3f8f845265a"
 dependencies = [
  "apply",
- "ashpd 0.14.3",
+ "ashpd",
  "auto_enums",
  "build_helpers",
  "cosmic-client-toolkit",
@@ -7076,7 +7061,6 @@ dependencies = [
  "rustix 1.1.6",
  "serde",
  "serde_repr",
- "tokio",
  "tracing",
  "uds_windows",
  "uuid",
