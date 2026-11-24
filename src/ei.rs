@@ -11,7 +11,6 @@ use cosmic::{
     action::{self, Action},
     iced::futures::stream::SelectAll,
 };
-use enumflags2::BitFlags;
 use reis::ei;
 use std::os::{fd::OwnedFd, unix::net::UnixStream};
 use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::{
@@ -29,10 +28,7 @@ const DEVICE_TYPE_POINTER: u32 = 2;
     default_path = "/com/system76/CosmicComp/Ei"
 )]
 trait Ei {
-    async fn get_sender_socket(
-        &self,
-        device_types: u32,
-    ) -> zbus::fdo::Result<zbus::zvariant::OwnedFd>;
+    async fn get_sender_socket(&self, device_types: u32) -> zbus::fdo::Result<zbus::OwnedFd>;
 
     #[zbus(signal)]
     async fn activated(&self, content_hint: u32, content_purpose: u32) -> zbus::Result<()>;
@@ -150,7 +146,7 @@ async fn open_connection(
                 .await
                 .unwrap();
             let options = SelectDevicesOptions::default()
-                .set_devices(BitFlags::from(DeviceType::Keyboard))
+                .set_devices(DeviceType::KEYBOARD)
                 .set_persist_mode(PersistMode::DoNot);
             remote_desktop
                 .select_devices(&session, options)
