@@ -295,17 +295,17 @@ impl App {
     pub fn on_subcommand(&mut self, subcommand: &str) -> Task<Message> {
         match subcommand {
             "hide" => {
-                if let Some(handler) = &self.config_handler {
-                    if let Err(err) = self.config.set_always_shown(handler, false) {
-                        log::error!("failed to set always_show: {}", err);
-                    }
+                if let Some(handler) = &self.config_handler
+                    && let Err(err) = self.config.set_always_shown(handler, false)
+                {
+                    log::error!("failed to set always_show: {}", err);
                 }
             }
             "show" => {
-                if let Some(handler) = &self.config_handler {
-                    if let Err(err) = self.config.set_always_shown(handler, true) {
-                        log::error!("failed to set always_show: {}", err);
-                    }
+                if let Some(handler) = &self.config_handler
+                    && let Err(err) = self.config.set_always_shown(handler, true)
+                {
+                    log::error!("failed to set always_show: {}", err);
                 }
             }
             "overlay" => {
@@ -516,56 +516,56 @@ impl App {
         };
 
         let mut focus = None;
-        if let Some(layout) = self.layout() {
-            if let Some(row) = layout.rows.get(index.0) {
-                match dir {
-                    FocusDirection::Left => {
-                        if index.1 == 0 {
-                            index.1 = row.len();
-                        }
-                        index.1 = index.1.saturating_sub(1);
+        if let Some(layout) = self.layout()
+            && let Some(row) = layout.rows.get(index.0)
+        {
+            match dir {
+                FocusDirection::Left => {
+                    if index.1 == 0 {
+                        index.1 = row.len();
                     }
-                    FocusDirection::Right => {
-                        index.1 = index.1.saturating_add(1);
-                        if index.1 >= row.len() {
-                            index.1 = 0;
-                        }
+                    index.1 = index.1.saturating_sub(1);
+                }
+                FocusDirection::Right => {
+                    index.1 = index.1.saturating_add(1);
+                    if index.1 >= row.len() {
+                        index.1 = 0;
                     }
-                    FocusDirection::Up | FocusDirection::Down => {
-                        let row_i = if matches!(dir, FocusDirection::Up) {
-                            index.0.saturating_sub(1)
-                        } else {
-                            index.0.saturating_add(1)
-                        };
-                        if let Some(next_row) = layout.rows.get(row_i) {
-                            let mut max_col_i = None;
-                            let mut max_overlap = 0.0;
-                            let mut x = 0.0;
-                            for (col_i, key) in next_row.iter().enumerate() {
-                                let next_x = x + key.width;
-                                let max_left = x.max(rect.x);
-                                let min_right = next_x.min(rect.x + rect.width);
-                                let overlap = (min_right - max_left).max(0.0);
-                                if overlap > max_overlap {
-                                    max_col_i = Some(col_i);
-                                    max_overlap = overlap;
-                                }
-                                x = next_x;
+                }
+                FocusDirection::Up | FocusDirection::Down => {
+                    let row_i = if matches!(dir, FocusDirection::Up) {
+                        index.0.saturating_sub(1)
+                    } else {
+                        index.0.saturating_add(1)
+                    };
+                    if let Some(next_row) = layout.rows.get(row_i) {
+                        let mut max_col_i = None;
+                        let mut max_overlap = 0.0;
+                        let mut x = 0.0;
+                        for (col_i, key) in next_row.iter().enumerate() {
+                            let next_x = x + key.width;
+                            let max_left = x.max(rect.x);
+                            let min_right = next_x.min(rect.x + rect.width);
+                            let overlap = (min_right - max_left).max(0.0);
+                            if overlap > max_overlap {
+                                max_col_i = Some(col_i);
+                                max_overlap = overlap;
                             }
-                            if let Some(col_i) = max_col_i {
-                                if let Some(key) = next_row.get(col_i) {
-                                    focus = Some(key.id.clone());
-                                }
-                            }
+                            x = next_x;
+                        }
+                        if let Some(col_i) = max_col_i
+                            && let Some(key) = next_row.get(col_i)
+                        {
+                            focus = Some(key.id.clone());
                         }
                     }
                 }
+            }
 
-                if focus.is_none() {
-                    if let Some(key) = row.get(index.1) {
-                        focus = Some(key.id.clone());
-                    }
-                }
+            if focus.is_none()
+                && let Some(key) = row.get(index.1)
+            {
+                focus = Some(key.id.clone());
             }
         }
 
@@ -966,11 +966,10 @@ impl Application for App {
                         log::info!("{:?}", evt);
 
                         evt.seat.bind_capabilities(
-                            (DeviceCapability::Keyboard
+                            DeviceCapability::Keyboard
                                 | DeviceCapability::Button
                                 | DeviceCapability::Pointer
-                                | DeviceCapability::Scroll)
-                                .into(),
+                                | DeviceCapability::Scroll,
                         );
                         let _ = self.ei_conn.as_ref().unwrap().flush();
                     }
@@ -1057,10 +1056,7 @@ impl Application for App {
                 }
             }
             Message::Gilrs(event) => {
-                let state = self
-                    .gamepads
-                    .entry(event.id)
-                    .or_insert_with(|| GamepadState::default());
+                let state = self.gamepads.entry(event.id).or_default();
 
                 match event.event {
                     EventType::ButtonPressed(button, _) => {
@@ -1188,15 +1184,15 @@ impl Application for App {
                             }
                             // Press current focused button on south button
                             Button::South => {
-                                if let Some((_, _, key)) = self.find_focus() {
-                                    if let Some(keycode) = key.keycode {
-                                        let key_level = self.key_level(&key);
-                                        return self.update(Message::Key {
-                                            kind: key_level.kind,
-                                            keycode,
-                                            pressed,
-                                        });
-                                    }
+                                if let Some((_, _, key)) = self.find_focus()
+                                    && let Some(keycode) = key.keycode
+                                {
+                                    let key_level = self.key_level(&key);
+                                    return self.update(Message::Key {
+                                        kind: key_level.kind,
+                                        keycode,
+                                        pressed,
+                                    });
                                 }
                             }
                             // Hide on east button
@@ -1254,15 +1250,15 @@ impl Application for App {
                                 if let Some(layout) = self.layout() {
                                     for row in layout.rows.iter() {
                                         for key in row.iter() {
-                                            if key.gamepad_mapping == Some(button) {
-                                                if let Some(keycode) = key.keycode {
-                                                    return self.update(Message::Key {
-                                                        // Use normal type to avoid sticky modifiers
-                                                        kind: layout::KeyKind::Normal,
-                                                        keycode,
-                                                        pressed,
-                                                    });
-                                                }
+                                            if key.gamepad_mapping == Some(button)
+                                                && let Some(keycode) = key.keycode
+                                            {
+                                                return self.update(Message::Key {
+                                                    // Use normal type to avoid sticky modifiers
+                                                    kind: layout::KeyKind::Normal,
+                                                    keycode,
+                                                    pressed,
+                                                });
                                             }
                                         }
                                     }
@@ -1297,7 +1293,7 @@ impl Application for App {
             for layout_row in layout.rows.iter() {
                 let mut r = widget::row::with_capacity(layout_row.len());
                 for key in layout_row.iter() {
-                    let key_level = self.key_level(&key);
+                    let key_level = self.key_level(key);
 
                     let mut pressed = false;
                     let mut selected = false;
@@ -1308,11 +1304,10 @@ impl Application for App {
                                     selected = true;
                                 }
                             } else {
-                                if let Some(xkb_state) = &self.xkb_state {
-                                    if xkb_state.mod_name_is_active(name, xkb::STATE_MODS_EFFECTIVE)
-                                    {
-                                        selected = true;
-                                    }
+                                if let Some(xkb_state) = &self.xkb_state
+                                    && xkb_state.mod_name_is_active(name, xkb::STATE_MODS_EFFECTIVE)
+                                {
+                                    selected = true;
                                 }
                             }
                         }
@@ -1449,12 +1444,12 @@ impl Application for App {
             }
             grid.into()
         } else {
-            widget::text(format!("missing layout")).into()
+            widget::text("missing layout".to_string()).into()
         };
 
         let mut column = widget::column::with_capacity(2);
         column = column.push(widget::row::with_children(vec![
-            menu::menu_bar(&self.core, &self.config, &self.key_binds).into(),
+            menu::menu_bar(&self.core, &self.config, &self.key_binds),
             widget::space().width(Length::Fill).into(),
             if self.docked {
                 widget::button::icon(
@@ -1527,7 +1522,7 @@ impl Application for App {
             }
             column = column.push(widget::row::with_children(vec![
                 widget::space().width(Length::Fill).into(),
-                grid.into(),
+                grid,
                 hints_col.width(Length::Fill).into(),
             ]));
         } else {

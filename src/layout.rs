@@ -51,10 +51,10 @@ impl KeyLevel {
         let mut name = xkb::keysym_get_name(sym);
 
         // Prefer keysym char
-        if let Some(char) = sym.key_char() {
-            if !char.is_control() {
-                name = char.to_string();
-            }
+        if let Some(char) = sym.key_char()
+            && !char.is_control()
+        {
+            name = char.to_string();
         }
 
         // Translate some keysym names
@@ -380,10 +380,7 @@ impl Layout {
                     _ => None,
                 };
 
-                let spacer = match keyname {
-                    "PRSC" | "NMLK" | "KP7" | "KP4" | "KP1" | "KP0" => true,
-                    _ => false,
-                };
+                let spacer = matches!(keyname, "PRSC" | "NMLK" | "KP7" | "KP4" | "KP1" | "KP0");
 
                 let mut key = Key {
                     id: widget::Id::unique(),
@@ -404,7 +401,7 @@ impl Layout {
                             }
 
                             let syms = keymap.key_get_syms_by_level(kc, layout, level as u32);
-                            if let Some(sym) = syms.get(0) {
+                            if let Some(sym) = syms.first() {
                                 key.levels[level] = KeyLevel::for_sym(*sym);
                             }
                         }
