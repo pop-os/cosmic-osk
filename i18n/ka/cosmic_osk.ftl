@@ -1,0 +1,15 @@
+appearance = გარეგნობა
+    .match-desktop = სამუშაო მაგიდის მიხედვით
+    .dark = მუქი
+    .light = ღია
+close-keyboard = კლავიატურის დახურვა
+float-keyboard = მცურავი კლავიატურა
+launch-keyboard = ეკრანის კლავიატურის გაშვება
+    .gamepad-shortcut = გაშვება და არჩევა/უკან გეიმპადებზე
+    .text-input = ტექსტის შეყვანის ველის მონიშვნისას
+left-click = მარცხენა წკაპი
+numpad = ციფრული კლავიატურა
+open-keyboard = კლავიატურის გახსნა
+right-click = მარჯვენა წკაპი
+scroll = გადახვევა
+system-and-function-keys = სისტემური და ფუნქციური ღილაკები

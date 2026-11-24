@@ -1,0 +1,15 @@
+appearance = 외관
+    .match-desktop = 시스템과 동기화
+    .dark = 다크
+    .light = 라이트
+close-keyboard = 키보드 닫기
+float-keyboard = 플로팅 키보드로 전환
+launch-keyboard = 화상 키보드 실행
+    .gamepad-shortcut = 게임패드에서 Start와 Select/Back 버튼 동시 입력 시
+    .text-input = 텍스트 입력란 선택 시
+left-click = 좌클릭
+numpad = 숫자 패드
+open-keyboard = 키보드 열기
+right-click = 우클릭
+scroll = 스크롤
+system-and-function-keys = 시스템 및 기능 키
